@@ -264,17 +264,24 @@ class WebSocketEventBroadcaster(tornado.websocket.WebSocketHandler):
     connections: ClassVar[set]
 
     def open(self):
+        print("--------class WebSocketEventBroadcaster(tornado.websocket.WebSocketHandler):: open-----")
         self.connections.add(self)
 
     def on_close(self):
+        print("--------class WebSocketEventBroadcaster(tornado.websocket.WebSocketHandler):: on_close-----")
         self.connections.remove(self)
+
+    def check_origin(self, origin):
+        return True
 
     @classmethod
     def broadcast(cls, **kwargs):
+        print("--------class WebSocketEventBroadcaster(tornado.websocket.WebSocketHandler):: broadcast-----")
         message = json.dumps(kwargs, ensure_ascii=False).encode("utf8", "surrogateescape")
-
+        # print(f"--------{message}-----")
         for conn in cls.connections:
             try:
+                # print(f"--------{conn}-----")
                 conn.write_message(message)
             except Exception:  # pragma: no cover
                 logging.error("Error sending message", exc_info=True)
@@ -286,11 +293,13 @@ class ClientConnection(WebSocketEventBroadcaster):
 
 class Flows(RequestHandler):
     def get(self):
+        print("--------class Flows(RequestHandler): GET-----")
         self.write([flow_to_json(f) for f in self.view])
 
 
 class DumpFlows(RequestHandler):
     def get(self):
+        print("--------class DumpFlows(RequestHandler): GET-----")
         self.set_header("Content-Disposition", "attachment; filename=flows")
         self.set_header("Content-Type", "application/octet-stream")
 
@@ -303,6 +312,7 @@ class DumpFlows(RequestHandler):
         bio.close()
 
     def post(self):
+        print("--------class DumpFlows(RequestHandler): POST-----")
         self.view.clear()
         bio = BytesIO(self.filecontents)
         for i in io.FlowReader(bio).stream():
@@ -312,12 +322,14 @@ class DumpFlows(RequestHandler):
 
 class ClearAll(RequestHandler):
     def post(self):
+        print("--------class ClearAll(RequestHandler) POST-----")
         self.view.clear()
         self.master.events.clear()
 
 
 class ResumeFlows(RequestHandler):
     def post(self):
+        print("--------class ResumeFlows(RequestHandler): post-----")
         for f in self.view:
             if not f.intercepted:
                 continue
@@ -327,6 +339,7 @@ class ResumeFlows(RequestHandler):
 
 class KillFlows(RequestHandler):
     def post(self):
+        print("--------class KillFlows(RequestHandler): post-----")
         for f in self.view:
             if f.killable:
                 f.kill()
@@ -335,12 +348,14 @@ class KillFlows(RequestHandler):
 
 class ResumeFlow(RequestHandler):
     def post(self, flow_id):
+        print("--------class ResumeFlow(RequestHandler): post-----")
         self.flow.resume()
         self.view.update([self.flow])
 
 
 class KillFlow(RequestHandler):
     def post(self, flow_id):
+        print("--------class KillFlow(RequestHandler):: post-----")
         if self.flow.killable:
             self.flow.kill()
             self.view.update([self.flow])
@@ -348,11 +363,13 @@ class KillFlow(RequestHandler):
 
 class FlowHandler(RequestHandler):
     def delete(self, flow_id):
+        print(f"--------class FlowHandler(RequestHandler): delete {flow_id}-----")
         if self.flow.killable:
             self.flow.kill()
         self.view.remove([self.flow])
 
     def put(self, flow_id):
+        print("--------class FlowHandler(RequestHandler): put-----")
         flow: mitmproxy.flow.Flow = self.flow
         flow.backup()
         try:
@@ -552,6 +569,7 @@ class ExecuteCommand(RequestHandler):
 
 class Events(RequestHandler):
     def get(self):
+        print(f"--------class Events(RequestHandler): get-----")
         self.write([logentry_to_json(e) for e in self.master.events.data])
 
 
@@ -587,6 +605,7 @@ class DnsRebind(RequestHandler):
 
 class Conf(RequestHandler):
     def get(self):
+        print(f"--------class Conf(RequestHandler): get-----")
         conf = {
             "static": False,
             "version": version.VERSION,
@@ -610,7 +629,7 @@ class Application(tornado.web.Application):
             debug=debug,
             autoreload=False,
         )
-
+        print("--------WEB backend has INIT-----")
         self.add_handlers("dns-rebind-protection", [(r"/.*", DnsRebind)])
         self.add_handlers(
             # make mitmweb accessible by IP only to prevent DNS rebinding.
