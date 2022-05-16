@@ -5,7 +5,7 @@ import HideInStatic from "../common/HideInStatic";
 import {useAppDispatch, useAppSelector} from "../../ducks";
 import * as flowActions from "../../ducks/flows"
 import {
-    duplicate as duplicateFlow,
+      as duplicateFlow,
     kill as killFlow,
     remove as removeFlow,
     replay as replayFlow,

@@ -294,6 +294,7 @@ class ClientConnection(WebSocketEventBroadcaster):
 class Flows(RequestHandler):
     def get(self):
         print("--------class Flows(RequestHandler): GET-----")
+        print(self.view)
         self.write([flow_to_json(f) for f in self.view])
 
 
