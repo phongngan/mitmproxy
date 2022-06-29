@@ -148,6 +148,7 @@ class HttpStream(layer.Layer):
         else:
             self.flow = event.replay_flow
         self.flow.request = event.request
+        self.flow.live = True
 
         if err := validate_request(self.mode, self.flow.request):
             self.flow.response = http.Response.make(502, str(err))
@@ -244,7 +245,9 @@ class HttpStream(layer.Layer):
         elif isinstance(event, RequestEndOfMessage):
             if callable(self.flow.request.stream):
                 chunks = self.flow.request.stream(b"")
-                if isinstance(chunks, bytes):
+                if chunks == b"":
+                    chunks = []
+                elif isinstance(chunks, bytes):
                     chunks = [chunks]
                 for chunk in chunks:
                     yield SendHttp(RequestData(self.stream_id, chunk), self.context.server)
@@ -336,7 +339,9 @@ class HttpStream(layer.Layer):
         elif isinstance(event, ResponseEndOfMessage):
             if callable(self.flow.response.stream):
                 chunks = self.flow.response.stream(b"")
-                if isinstance(chunks, bytes):
+                if chunks == b"":
+                    chunks = []
+                elif isinstance(chunks, bytes):
                     chunks = [chunks]
                 for chunk in chunks:
                     yield SendHttp(ResponseData(self.stream_id, chunk), self.context.client)
@@ -409,6 +414,9 @@ class HttpStream(layer.Layer):
         # we may get data immediately and need to be prepared to handle it.
         yield SendHttp(ResponseEndOfMessage(self.stream_id), self.context.client)
 
+        if not is_websocket:
+            self.flow.live = False
+
     def check_body_size(self, request: bool) -> layer.CommandGenerator[bool]:
         """
         Check if the body size exceeds limits imposed by stream_large_bodies or body_size_limit.
@@ -456,6 +464,7 @@ class HttpStream(layer.Layer):
             if response:
                 yield SendHttp(RequestProtocolError(self.stream_id, err_msg, err_code), self.context.server)
                 self.server_state = self.state_errored
+            self.flow.live = False
             return True
 
         # Step 3: Do we need to stream this?
@@ -502,6 +511,7 @@ class HttpStream(layer.Layer):
                 ResponseProtocolError(self.stream_id, "killed", status_codes.NO_RESPONSE),
                 self.context.client
             )
+            self.flow.live = False
             self._handle_event = self.state_errored
             return True
         return False
@@ -538,6 +548,8 @@ class HttpStream(layer.Layer):
             if self.client_state != self.state_errored:
                 yield SendHttp(event, self.context.client)
             self.server_state = self.state_errored
+
+        self.flow.live = False
 
     def make_server_connection(self) -> layer.CommandGenerator[bool]:
         connection, err = yield GetHttpConnection(

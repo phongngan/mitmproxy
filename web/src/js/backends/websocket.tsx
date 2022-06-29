@@ -54,7 +54,8 @@ export default class WebsocketBackend {
     }
 
     onMessage(msg) {
-
+        console.log("----OnMessage----")
+        console.log(msg)
         if (msg.cmd === CMD_RESET) {
             return this.fetchData(msg.resource)
         }
