@@ -4,6 +4,8 @@ import json
 import logging
 import os.path
 import re
+import random
+import string
 from io import BytesIO
 from itertools import islice
 from typing import ClassVar, Optional, Sequence, Union
@@ -26,6 +28,8 @@ from mitmproxy.tcp import TCPFlow, TCPMessage
 from mitmproxy.utils.emoji import emoji
 from mitmproxy.utils.strutils import always_str
 from mitmproxy.websocket import WebSocketMessage
+from pprint import pprint
+
 
 
 def cert_to_json(certs: Sequence[certs.Cert]) -> Optional[dict]:
@@ -201,6 +205,8 @@ class RequestHandler(tornado.web.RequestHandler):
 
     @property
     def json(self):
+        print("-----------json-------------")
+        print(self.request.body.decode())
         if not self.request.headers.get("Content-Type", "").startswith("application/json"):
             raise APIError(400, "Invalid Content-Type, expected application/json.")
         try:
@@ -457,6 +463,39 @@ class FlowContent(RequestHandler):
         self.set_header("X-Frame-Options", "DENY")
         self.write(message.get_content(strict=False))
 
+class FlowRaw(RequestHandler):
+    # def post(self, flow_id, message):
+    #     self.flow.backup()
+    #     message = getattr(self.flow, message)
+    #     message.content = self.filecontents
+    #     self.view.update([self.flow])
+
+    def get(self, flow_id, message):
+        data={"request":None,"response":None}
+        if message in ["all","request"] and self.flow.request != None:
+            headers= f"{self.flow.request.method} {self.flow.request.path} {self.flow.request.http_version}\r\n".encode()
+            for key,val in self.flow.request.headers.items():
+                print(f"{key},{val}")
+                headers+=key.encode()+b": "+val.encode()+b"\r\n"
+            data["request"]=headers+b"\r\n"+self.flow.request.content
+            
+
+        if message in ["all","response"] and self.flow.response != None:
+            headers= f"{self.flow.response.http_version} {self.flow.response.status_code} {self.flow.response.reason}\r\n".encode()
+            for key,val in self.flow.response.headers.items():
+                print(f"{key},{val}")
+                headers+=key.encode()+b": "+val.encode()+b"\r\n"
+            data["response"]=headers+b"\r\n"+self.flow.response.content
+        # pprint(vars(self.flow.request.headers))
+        # pprint(vars(self.flow.response.headers))
+    
+        self.set_header("Content-Type", "application/text")
+        self.set_header("X-Content-Type-Options", "nosniff")
+        self.set_header("X-Frame-Options", "DENY")
+        r = (''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(24))).encode()
+        while r in data["request"] or r in data["response"]:
+            r = (''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(24))).encode()
+        self.write(r+data["request"]+r+data["response"])
 
 class FlowContentView(RequestHandler):
     def message_to_json(
@@ -560,6 +599,8 @@ class Options(RequestHandler):
 
     def put(self):
         update = self.json
+        print("--------Option.put--------")
+        print(self.json)
         try:
             self.master.options.update(**update)
         except Exception as err:
@@ -604,8 +645,8 @@ class Application(tornado.web.Application):
             default_host="dns-rebind-protection",
             template_path=os.path.join(os.path.dirname(__file__), "templates"),
             static_path=os.path.join(os.path.dirname(__file__), "static"),
-            xsrf_cookies=True,
-            cookie_secret=os.urandom(256),
+            xsrf_cookies=False,
+            cookie_secret="932473894723479",
             debug=debug,
             autoreload=False,
         )
@@ -632,6 +673,7 @@ class Application(tornado.web.Application):
                 (r"/flows/(?P<flow_id>[0-9a-f\-]+)/replay", ReplayFlow),
                 (r"/flows/(?P<flow_id>[0-9a-f\-]+)/revert", RevertFlow),
                 (r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|messages)/content.data", FlowContent),
+                (r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|all)/raw", FlowRaw),
                 (
                     r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|messages)/"
                     r"content/(?P<content_view>[0-9a-zA-Z\-\_%]+)(?:\.json)?",

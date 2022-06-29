@@ -86,6 +86,7 @@ setup(
         "pyparsing>=2.4.2,<3.1",
         "pyperclip>=1.6.0,<1.9",
         "ruamel.yaml>=0.16,<0.18",
+        "base91>=1.0.1",
         # Kaitai parsers depend on setuptools, remove once https://github.com/kaitai-io/kaitai_struct_python_runtime/issues/62 is fixed
         "setuptools",
         "sortedcontainers>=2.3,<2.5",
@@ -94,6 +95,7 @@ setup(
         "wsproto>=1.0,<1.1",
         "publicsuffix2>=2.20190812,<3",
         "zstandard>=0.11,<0.17",
+
     ],
     extras_require={
         ':sys_platform == "win32"': [
