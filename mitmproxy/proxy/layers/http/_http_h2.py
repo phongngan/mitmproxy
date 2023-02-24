@@ -1,5 +1,6 @@
 import collections
-from typing import DefaultDict, Deque, NamedTuple
+import logging
+from typing import NamedTuple
 
 import h2.config
 import h2.connection
@@ -9,16 +10,27 @@ import h2.settings
 import h2.stream
 
 
+logger = logging.getLogger(__name__)
+
+
 class H2ConnectionLogger(h2.config.DummyLogger):
-    def __init__(self, name: str):
+    def __init__(self, peername: tuple, conn_type: str):
         super().__init__()
-        self.name = name
+        self.peername = peername
+        self.conn_type = conn_type
 
     def debug(self, fmtstr, *args):
-        print(f"{self.name} h2 (debug): {fmtstr % args}")
+        logger.debug(
+            f"{self.conn_type} {fmtstr}", *args, extra={"client": self.peername}
+        )
 
     def trace(self, fmtstr, *args):
-        print(f"{self.name} h2 (trace): {fmtstr % args}")
+        logger.log(
+            logging.DEBUG - 1,
+            f"{self.conn_type} {fmtstr}",
+            *args,
+            extra={"client": self.peername},
+        )
 
 
 class SendH2Data(NamedTuple):
@@ -32,18 +44,21 @@ class BufferedH2Connection(h2.connection.H2Connection):
 
     To simplify implementation, padding is unsupported.
     """
-    stream_buffers: DefaultDict[int, Deque[SendH2Data]]
+
+    stream_buffers: collections.defaultdict[int, collections.deque[SendH2Data]]
+    stream_trailers: dict[int, list[tuple[bytes, bytes]]]
 
     def __init__(self, config: h2.config.H2Configuration):
         super().__init__(config)
         self.stream_buffers = collections.defaultdict(collections.deque)
+        self.stream_trailers = {}
 
     def send_data(
         self,
         stream_id: int,
         data: bytes,
         end_stream: bool = False,
-        pad_length: None = None
+        pad_length: None = None,
     ) -> None:
         """
         Send data on a given stream.
@@ -55,17 +70,15 @@ class BufferedH2Connection(h2.connection.H2Connection):
         assert pad_length is None
 
         while frame_size > self.max_outbound_frame_size:
-            chunk_data = data[:self.max_outbound_frame_size]
+            chunk_data = data[: self.max_outbound_frame_size]
             self.send_data(stream_id, chunk_data, end_stream=False)
 
-            data = data[self.max_outbound_frame_size:]
+            data = data[self.max_outbound_frame_size :]
             frame_size -= len(chunk_data)
 
         if self.stream_buffers.get(stream_id, None):
             # We already have some data buffered, let's append.
-            self.stream_buffers[stream_id].append(
-                SendH2Data(data, end_stream)
-            )
+            self.stream_buffers[stream_id].append(SendH2Data(data, end_stream))
         else:
             available_window = self.local_flow_control_window(stream_id)
             if frame_size <= available_window:
@@ -76,11 +89,18 @@ class BufferedH2Connection(h2.connection.H2Connection):
                     super().send_data(stream_id, can_send_now, end_stream=False)
                     data = data[available_window:]
                 # We can't send right now, so we buffer.
-                self.stream_buffers[stream_id].append(
-                    SendH2Data(data, end_stream)
-                )
+                self.stream_buffers[stream_id].append(SendH2Data(data, end_stream))
 
-    def end_stream(self, stream_id) -> None:
+    def send_trailers(self, stream_id: int, trailers: list[tuple[bytes, bytes]]):
+        if self.stream_buffers.get(stream_id, None):
+            # Though trailers are not subject to flow control, we need to queue them and send strictly after data frames
+            self.stream_trailers[stream_id] = trailers
+        else:
+            self.send_headers(stream_id, trailers, end_stream=True)
+
+    def end_stream(self, stream_id: int) -> None:
+        if stream_id in self.stream_trailers:
+            return  # we already have trailers queued up that will end the stream.
         self.send_data(stream_id, b"", end_stream=True)
 
     def reset_stream(self, stream_id: int, error_code: int = 0) -> None:
@@ -98,7 +118,10 @@ class BufferedH2Connection(h2.connection.H2Connection):
                     self.stream_window_updated(event.stream_id)
                 continue
             elif isinstance(event, h2.events.RemoteSettingsChanged):
-                if h2.settings.SettingCodes.INITIAL_WINDOW_SIZE in event.changed_settings:
+                if (
+                    h2.settings.SettingCodes.INITIAL_WINDOW_SIZE
+                    in event.changed_settings
+                ):
                     self.connection_window_updated()
             elif isinstance(event, h2.events.StreamReset):
                 self.stream_buffers.pop(event.stream_id, None)
@@ -117,8 +140,9 @@ class BufferedH2Connection(h2.connection.H2Connection):
         except KeyError:
             stream_was_reset = True
         else:
-            stream_was_reset = (
-                stream.state_machine.state not in (h2.stream.StreamState.OPEN, h2.stream.StreamState.HALF_CLOSED_REMOTE)
+            stream_was_reset = stream.state_machine.state not in (
+                h2.stream.StreamState.OPEN,
+                h2.stream.StreamState.HALF_CLOSED_REMOTE,
             )
         if stream_was_reset:
             self.stream_buffers.pop(stream_id, None)
@@ -146,6 +170,10 @@ class BufferedH2Connection(h2.connection.H2Connection):
             available_window -= len(chunk.data)
             if not self.stream_buffers[stream_id]:
                 del self.stream_buffers[stream_id]
+                if stream_id in self.stream_trailers:
+                    self.send_headers(
+                        stream_id, self.stream_trailers.pop(stream_id), end_stream=True
+                    )
             sent_any_data = True
 
         return sent_any_data
@@ -158,7 +186,9 @@ class BufferedH2Connection(h2.connection.H2Connection):
         while sent_any_data:
             sent_any_data = False
             for stream_id in list(self.stream_buffers):
-                self.stream_buffers[stream_id] = self.stream_buffers.pop(stream_id)  # move to end of dict
+                self.stream_buffers[stream_id] = self.stream_buffers.pop(
+                    stream_id
+                )  # move to end of dict
                 if self.stream_window_updated(stream_id):
                     sent_any_data = True
                     if self.outbound_flow_control_window == 0:

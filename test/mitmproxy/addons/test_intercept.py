@@ -1,7 +1,7 @@
 import pytest
 
-from mitmproxy.addons import intercept
 from mitmproxy import exceptions
+from mitmproxy.addons import intercept
 from mitmproxy.test import taddons
 from mitmproxy.test import tflow
 
@@ -44,6 +44,25 @@ async def test_simple():
         assert f.intercepted
 
 
+async def test_dns():
+    r = intercept.Intercept()
+    with taddons.context(r) as tctx:
+        tctx.configure(r, intercept="~s ~dns")
+
+        f = tflow.tdnsflow(resp=True)
+        await tctx.cycle(r, f)
+        assert f.intercepted
+
+        f = tflow.tdnsflow(resp=False)
+        await tctx.cycle(r, f)
+        assert not f.intercepted
+
+        tctx.configure(r, intercept_active=False)
+        f = tflow.tdnsflow(resp=True)
+        await tctx.cycle(r, f)
+        assert not f.intercepted
+
+
 async def test_tcp():
     r = intercept.Intercept()
     with taddons.context(r) as tctx:
@@ -54,5 +73,19 @@ async def test_tcp():
 
         tctx.configure(r, intercept_active=False)
         f = tflow.ttcpflow()
+        await tctx.cycle(r, f)
+        assert not f.intercepted
+
+
+async def test_udp():
+    r = intercept.Intercept()
+    with taddons.context(r) as tctx:
+        tctx.configure(r, intercept="~udp")
+        f = tflow.tudpflow()
+        await tctx.cycle(r, f)
+        assert f.intercepted
+
+        tctx.configure(r, intercept_active=False)
+        f = tflow.tudpflow()
         await tctx.cycle(r, f)
         assert not f.intercepted

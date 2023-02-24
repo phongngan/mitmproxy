@@ -2,24 +2,18 @@ import math
 
 import urwid
 
-from mitmproxy.tools.console import signals
 from mitmproxy.tools.console import grideditor
-from mitmproxy.tools.console import layoutwidget
 from mitmproxy.tools.console import keymap
+from mitmproxy.tools.console import layoutwidget
+from mitmproxy.tools.console import signals
 
 
 class SimpleOverlay(urwid.Overlay, layoutwidget.LayoutWidget):
-
     def __init__(self, master, widget, parent, width, valign="middle"):
         self.widget = widget
         self.master = master
         super().__init__(
-            widget,
-            parent,
-            align="center",
-            width=width,
-            valign=valign,
-            height="pack"
+            widget, parent, align="center", width=width, valign=valign, height="pack"
         )
 
     @property
@@ -74,7 +68,7 @@ class ChooserListWalker(urwid.ListWalker):
 
     def _get(self, idx, focus):
         c = self.choices[idx]
-        return Choice(c, focus, c == self.current, self.shortcuts[idx:idx + 1])
+        return Choice(c, focus, c == self.current, self.shortcuts[idx : idx + 1])
 
     def set_focus(self, index):
         self.index = index
@@ -96,7 +90,7 @@ class ChooserListWalker(urwid.ListWalker):
 
     def choice_by_shortcut(self, shortcut):
         for i, choice in enumerate(self.choices):
-            if shortcut == self.shortcuts[i:i + 1]:
+            if shortcut == self.shortcuts[i : i + 1]:
                 return choice
         return None
 
@@ -115,13 +109,10 @@ class Chooser(urwid.WidgetWrap, layoutwidget.LayoutWidget):
         super().__init__(
             urwid.AttrWrap(
                 urwid.LineBox(
-                    urwid.BoxAdapter(
-                        urwid.ListBox(self.walker),
-                        len(choices)
-                    ),
-                    title=title
+                    urwid.BoxAdapter(urwid.ListBox(self.walker), len(choices)),
+                    title=title,
                 ),
-                "background"
+                "background",
             )
         )
 
@@ -133,14 +124,14 @@ class Chooser(urwid.WidgetWrap, layoutwidget.LayoutWidget):
         choice = self.walker.choice_by_shortcut(key)
         if choice:
             self.callback(choice)
-            signals.pop_view_state.send(self)
+            signals.pop_view_state.send()
             return
         if key == "m_select":
             self.callback(self.choices[self.walker.index])
-            signals.pop_view_state.send(self)
+            signals.pop_view_state.send()
             return
         elif key in ["q", "esc"]:
-            signals.pop_view_state.send(self)
+            signals.pop_view_state.send()
             return
 
         binding = self.master.keymap.get("global", key)
@@ -156,17 +147,14 @@ class OptionsOverlay(urwid.WidgetWrap, layoutwidget.LayoutWidget):
 
     def __init__(self, master, name, vals, vspace):
         """
-            vspace: how much vertical space to keep clear
+        vspace: how much vertical space to keep clear
         """
         cols, rows = master.ui.get_cols_rows()
         self.ge = grideditor.OptionsEditor(master, name, vals)
         super().__init__(
             urwid.AttrWrap(
-                urwid.LineBox(
-                    urwid.BoxAdapter(self.ge, rows - vspace),
-                    title=name
-                ),
-                "background"
+                urwid.LineBox(urwid.BoxAdapter(self.ge, rows - vspace), title=name),
+                "background",
             )
         )
         self.width = math.ceil(cols * 0.8)
@@ -183,17 +171,14 @@ class DataViewerOverlay(urwid.WidgetWrap, layoutwidget.LayoutWidget):
 
     def __init__(self, master, vals):
         """
-            vspace: how much vertical space to keep clear
+        vspace: how much vertical space to keep clear
         """
         cols, rows = master.ui.get_cols_rows()
         self.ge = grideditor.DataViewer(master, vals)
         super().__init__(
             urwid.AttrWrap(
-                urwid.LineBox(
-                    urwid.BoxAdapter(self.ge, rows - 5),
-                    title="Data viewer"
-                ),
-                "background"
+                urwid.LineBox(urwid.BoxAdapter(self.ge, rows - 5), title="Data viewer"),
+                "background",
             )
         )
         self.width = math.ceil(cols * 0.8)

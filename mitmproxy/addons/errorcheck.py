@@ -1,6 +1,6 @@
 import asyncio
+import logging
 import sys
-from typing import Optional
 
 from mitmproxy import log
 
@@ -8,20 +8,31 @@ from mitmproxy import log
 class ErrorCheck:
     """Monitor startup for error log entries, and terminate immediately if there are some."""
 
-    def __init__(self, log_to_stderr: bool = False):
-        self.has_errored: Optional[str] = None
+    def __init__(self, log_to_stderr: bool = False) -> None:
         self.log_to_stderr = log_to_stderr
 
-    def add_log(self, e: log.LogEntry):
-        if not self.has_errored and e.level == "error":
-            self.has_errored = e.msg
+        self.logger = ErrorCheckHandler()
+        self.logger.install()
 
-    async def running(self):
+    def finish(self):
+        self.logger.uninstall()
+
+    async def shutdown_if_errored(self):
         # don't run immediately, wait for all logging tasks to finish.
-        asyncio.create_task(self._shutdown_if_errored())
-
-    async def _shutdown_if_errored(self):
-        if self.has_errored:
+        await asyncio.sleep(0)
+        if self.logger.has_errored:
             if self.log_to_stderr:
-                print(f"Error on startup: {self.has_errored}", file=sys.stderr)
+                plural = "s" if len(self.logger.has_errored) > 1 else ""
+                msg = "\n".join(r.msg for r in self.logger.has_errored)
+                print(f"Error{plural} on startup: {msg}", file=sys.stderr)
+
             sys.exit(1)
+
+
+class ErrorCheckHandler(log.MitmLogHandler):
+    def __init__(self) -> None:
+        super().__init__(logging.ERROR)
+        self.has_errored: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.has_errored.append(record)

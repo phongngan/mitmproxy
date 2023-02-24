@@ -1,28 +1,34 @@
 # Default view cutoff *in lines*
-import typing
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
+from collections.abc import Iterable
+from collections.abc import Iterator
+from collections.abc import Mapping
+from typing import ClassVar
+from typing import Optional
+from typing import Union
 
 from mitmproxy import flow
 from mitmproxy import http
 
 KEY_MAX = 30
 
-TTextType = typing.Union[str, bytes]  # FIXME: This should be either bytes or str ultimately.
-TViewLine = typing.List[typing.Tuple[str, TTextType]]
-TViewResult = typing.Tuple[str, typing.Iterator[TViewLine]]
+TTextType = Union[str, bytes]  # FIXME: This should be either bytes or str ultimately.
+TViewLine = list[tuple[str, TTextType]]
+TViewResult = tuple[str, Iterator[TViewLine]]
 
 
 class View(ABC):
-    name: typing.ClassVar[str]
+    name: ClassVar[str]
 
     @abstractmethod
     def __call__(
         self,
         data: bytes,
         *,
-        content_type: typing.Optional[str] = None,
-        flow: typing.Optional[flow.Flow] = None,
-        http_message: typing.Optional[http.Message] = None,
+        content_type: Optional[str] = None,
+        flow: Optional[flow.Flow] = None,
+        http_message: Optional[http.Message] = None,
         **unknown_metadata,
     ) -> TViewResult:
         """
@@ -46,9 +52,9 @@ class View(ABC):
         self,
         data: bytes,
         *,
-        content_type: typing.Optional[str] = None,
-        flow: typing.Optional[flow.Flow] = None,
-        http_message: typing.Optional[http.Message] = None,
+        content_type: Optional[str] = None,
+        flow: Optional[flow.Flow] = None,
+        http_message: Optional[http.Message] = None,
         **unknown_metadata,
     ) -> float:
         """
@@ -65,9 +71,7 @@ class View(ABC):
         return self.name.__lt__(other.name)
 
 
-def format_pairs(
-    items: typing.Iterable[typing.Tuple[TTextType, TTextType]]
-) -> typing.Iterator[TViewLine]:
+def format_pairs(items: Iterable[tuple[TTextType, TTextType]]) -> Iterator[TViewLine]:
     """
     Helper function that accepts a list of (k,v) pairs into a list of
     [
@@ -82,22 +86,16 @@ def format_pairs(
 
     for key, value in items:
         if isinstance(key, bytes):
-
             key += b":"
         else:
             key += ":"
 
         key = key.ljust(max_key_len + 2)
 
-        yield [
-            ("header", key),
-            ("text", value)
-        ]
+        yield [("header", key), ("text", value)]
 
 
-def format_dict(
-    d: typing.Mapping[TTextType, TTextType]
-) -> typing.Iterator[TViewLine]:
+def format_dict(d: Mapping[TTextType, TTextType]) -> Iterator[TViewLine]:
     """
     Helper function that transforms the given dictionary into a list of
     [
@@ -110,7 +108,7 @@ def format_dict(
     return format_pairs(d.items())
 
 
-def format_text(text: TTextType) -> typing.Iterator[TViewLine]:
+def format_text(text: TTextType) -> Iterator[TViewLine]:
     """
     Helper function that transforms bytes into the view output format.
     """

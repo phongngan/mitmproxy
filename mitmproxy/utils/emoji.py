@@ -2,7 +2,6 @@
 """
 All of the emoji and characters that can be used as flow markers.
 """
-
 # auto-generated. run this file to refresh.
 
 emoji = {
@@ -1882,6 +1881,11 @@ if __name__ == "__main__":  # pragma: no cover
         print(CHAR_SRC.format(name=c, emoji_val=c), file=out)
 
     Path(__file__).write_text(
-        re.sub(r"(?<={\n)[\s\S]*(?=}\n)", lambda x: out.getvalue(), Path(__file__).read_text("utf8"), 1),
-        "utf8"
+        re.sub(
+            r"(?<={\n)[\s\S]*(?=}\n)",
+            lambda x: out.getvalue(),
+            Path(__file__).read_text("utf8"),
+            1,
+        ),
+        "utf8",
     )

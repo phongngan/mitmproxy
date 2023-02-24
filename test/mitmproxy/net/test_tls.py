@@ -1,6 +1,8 @@
 from pathlib import Path
 
+from OpenSSL import crypto
 from OpenSSL import SSL
+
 from mitmproxy import certs
 from mitmproxy.net import tls
 
@@ -12,31 +14,31 @@ def test_make_master_secret_logger():
 
 def test_sslkeylogfile(tdata, monkeypatch):
     keylog = []
-    monkeypatch.setattr(tls, "log_master_secret", lambda conn, secrets: keylog.append(secrets))
+    monkeypatch.setattr(
+        tls, "log_master_secret", lambda conn, secrets: keylog.append(secrets)
+    )
 
     store = certs.CertStore.from_files(
         Path(tdata.path("mitmproxy/net/data/verificationcerts/trusted-root.pem")),
-        Path(tdata.path("mitmproxy/net/data/dhparam.pem"))
+        Path(tdata.path("mitmproxy/net/data/dhparam.pem")),
     )
     entry = store.get_cert("example.com", [], None)
 
     cctx = tls.create_proxy_server_context(
+        method=tls.Method.TLS_CLIENT_METHOD,
         min_version=tls.DEFAULT_MIN_VERSION,
         max_version=tls.DEFAULT_MAX_VERSION,
         cipher_list=None,
         verify=tls.Verify.VERIFY_NONE,
-        hostname=None,
         ca_path=None,
         ca_pemfile=None,
         client_cert=None,
-        alpn_protos=(),
     )
     sctx = tls.create_client_proxy_context(
+        method=tls.Method.TLS_SERVER_METHOD,
         min_version=tls.DEFAULT_MIN_VERSION,
         max_version=tls.DEFAULT_MAX_VERSION,
         cipher_list=None,
-        cert=entry.cert,
-        key=entry.privatekey,
         chain_file=entry.chain_file,
         alpn_select_callback=None,
         request_client_cert=False,
@@ -47,16 +49,18 @@ def test_sslkeylogfile(tdata, monkeypatch):
     server = SSL.Connection(sctx)
     server.set_accept_state()
 
+    server.use_certificate(entry.cert.to_pyopenssl())
+    server.use_privatekey(crypto.PKey.from_cryptography_key(entry.privatekey))
+
     client = SSL.Connection(cctx)
     client.set_connect_state()
 
     read, write = client, server
     while True:
         try:
-            print(read)
             read.do_handshake()
         except SSL.WantReadError:
-            write.bio_write(read.bio_read(2 ** 16))
+            write.bio_write(read.bio_read(2**16))
         else:
             break
         read, write = write, read

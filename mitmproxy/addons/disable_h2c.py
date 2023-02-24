@@ -1,4 +1,4 @@
-import mitmproxy
+import logging
 
 
 class DisableH2C:
@@ -15,22 +15,26 @@ class DisableH2C:
     """
 
     def process_flow(self, f):
-        if f.request.headers.get('upgrade', '') == 'h2c':
-            mitmproxy.ctx.log.warn("HTTP/2 cleartext connections (h2c upgrade requests) are currently not supported.")
-            del f.request.headers['upgrade']
-            if 'connection' in f.request.headers:
-                del f.request.headers['connection']
-            if 'http2-settings' in f.request.headers:
-                del f.request.headers['http2-settings']
+        if f.request.headers.get("upgrade", "") == "h2c":
+            logging.warning(
+                "HTTP/2 cleartext connections (h2c upgrade requests) are currently not supported."
+            )
+            del f.request.headers["upgrade"]
+            if "connection" in f.request.headers:
+                del f.request.headers["connection"]
+            if "http2-settings" in f.request.headers:
+                del f.request.headers["http2-settings"]
 
         is_connection_preface = (
-            f.request.method == 'PRI' and
-            f.request.path == '*' and
-            f.request.http_version == 'HTTP/2.0'
+            f.request.method == "PRI"
+            and f.request.path == "*"
+            and f.request.http_version == "HTTP/2.0"
         )
         if is_connection_preface:
             f.kill()
-            mitmproxy.ctx.log.warn("Initiating HTTP/2 connections with prior knowledge are currently not supported.")
+            logging.warning(
+                "Initiating HTTP/2 connections with prior knowledge are currently not supported."
+            )
 
     # Handlers
 

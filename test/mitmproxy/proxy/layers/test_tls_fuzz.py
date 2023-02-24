@@ -1,8 +1,10 @@
-from hypothesis import given, example
-from hypothesis.strategies import binary, integers
+from hypothesis import example
+from hypothesis import given
+from hypothesis.strategies import binary
+from hypothesis.strategies import integers
 
-from mitmproxy.tls import ClientHello
 from mitmproxy.proxy.layers.tls import parse_client_hello
+from mitmproxy.tls import ClientHello
 
 client_hello_with_extensions = bytes.fromhex(
     "16030300bb"  # record layer
@@ -16,7 +18,7 @@ client_hello_with_extensions = bytes.fromhex(
 
 
 @given(i=integers(0, len(client_hello_with_extensions)), data=binary())
-@example(i=183, data=b'\x00\x00\x00\x00\x00\x00\x00\x00\x00')
+@example(i=183, data=b"\x00\x00\x00\x00\x00\x00\x00\x00\x00")
 def test_fuzz_parse_client_hello(i, data):
     try:
         ch = parse_client_hello(client_hello_with_extensions[:i] + data)

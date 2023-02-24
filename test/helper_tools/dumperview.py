@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 import asyncio
+
 import click
 
 from mitmproxy.addons import dumper
-from mitmproxy.test import tflow
 from mitmproxy.test import taddons
+from mitmproxy.test import tflow
 
 
 def run_async(coro):
     """
-        Run the given async function in a new event loop.
-        This allows async functions to be called synchronously.
+    Run the given async function in a new event loop.
+    This allows async functions to be called synchronously.
     """
     loop = asyncio.new_event_loop()
     try:
@@ -33,14 +34,21 @@ def cli():
 
 
 @cli.command()
-@click.option('--level', default=1, help='Detail level')
+@click.option("--level", default=1, help="Detail level")
 def tcp(level):
     f1 = tflow.ttcpflow()
     show(level, [f1])
 
 
 @cli.command()
-@click.option('--level', default=1, help='Detail level')
+@click.option("--level", default=1, help="Detail level")
+def udp(level):
+    f1 = tflow.tudpflow()
+    show(level, [f1])
+
+
+@cli.command()
+@click.option("--level", default=1, help="Detail level")
 def large(level):
     f1 = tflow.tflow(resp=True)
     f1.response.headers["content-type"] = "text/html"
@@ -49,7 +57,7 @@ def large(level):
 
 
 @cli.command()
-@click.option('--level', default=1, help='Detail level')
+@click.option("--level", default=1, help="Detail level")
 def small(level):
     f1 = tflow.tflow(resp=True)
     f1.response.headers["content-type"] = "text/html"
@@ -60,8 +68,9 @@ def small(level):
     show(
         level,
         [
-            f1, f2,
-        ]
+            f1,
+            f2,
+        ],
     )
 
 

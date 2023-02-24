@@ -1,13 +1,11 @@
 from mitmproxy.proxy import context
-from mitmproxy.test import tflow, taddons
+from mitmproxy.test import taddons
+from mitmproxy.test import tflow
 
 
 def test_context():
     with taddons.context() as tctx:
-        c = context.Context(
-            tflow.tclient_conn(),
-            tctx.options
-        )
+        c = context.Context(tflow.tclient_conn(), tctx.options)
         assert repr(c)
         c.layers.append(1)
         assert repr(c)

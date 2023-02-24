@@ -1,13 +1,15 @@
-import urwid
-import blinker
 import textwrap
+
+import urwid
+
 from mitmproxy.tools.console import layoutwidget
 from mitmproxy.tools.console import signals
+from mitmproxy.utils import signals as utils_signals
 
 HELP_HEIGHT = 5
 
 
-keybinding_focus_change = blinker.Signal()
+keybinding_focus_change = utils_signals.SyncSignal(lambda text: None)
 
 
 class KeyItem(urwid.WidgetWrap):
@@ -46,7 +48,7 @@ class KeyListWalker(urwid.ListWalker):
         self.set_focus(0)
         signals.keybindings_change.connect(self.sig_modified)
 
-    def sig_modified(self, sender):
+    def sig_modified(self):
         self.bindings = list(self.master.keymap.list("all"))
         self.set_focus(min(self.index, len(self.bindings) - 1))
         self._modified()
@@ -120,9 +122,7 @@ class KeyHelp(urwid.Frame):
 
     def widget(self, txt):
         cols, _ = self.master.ui.get_cols_rows()
-        return urwid.ListBox(
-            [urwid.Text(i) for i in textwrap.wrap(txt, cols)]
-        )
+        return urwid.ListBox([urwid.Text(i) for i in textwrap.wrap(txt, cols)])
 
     def sig_mod(self, txt):
         self.set_body(self.widget(txt))
@@ -131,6 +131,7 @@ class KeyHelp(urwid.Frame):
 class KeyBindings(urwid.Pile, layoutwidget.LayoutWidget):
     title = "Key Bindings"
     keyctx = "keybindings"
+    focus_position: int
 
     def __init__(self, master):
         oh = KeyHelp(master)
@@ -150,9 +151,7 @@ class KeyBindings(urwid.Pile, layoutwidget.LayoutWidget):
 
     def keypress(self, size, key):
         if key == "m_next":
-            self.focus_position = (
-                self.focus_position + 1
-            ) % len(self.widget_list)
+            self.focus_position = (self.focus_position + 1) % len(self.widget_list)
             self.widget_list[1].set_active(self.focus_position == 1)
             key = None
 
@@ -160,7 +159,7 @@ class KeyBindings(urwid.Pile, layoutwidget.LayoutWidget):
         # So much for "closed for modification, but open for extension".
         item_rows = None
         if len(size) == 2:
-            item_rows = self.get_item_rows(size, focus = True)
+            item_rows = self.get_item_rows(size, focus=True)
         i = self.widget_list.index(self.focus_item)
         tsize = self.get_item_size(size, i, True, item_rows)
         return self.focus_item.keypress(tsize, key)

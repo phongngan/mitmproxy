@@ -1,18 +1,25 @@
+import logging
 import os.path
 import sys
-import typing
+from collections.abc import Sequence
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
+from typing import Optional
 
 import mitmproxy.types
-from mitmproxy import command, tcp
+from mitmproxy import command
 from mitmproxy import ctx
+from mitmproxy import dns
 from mitmproxy import exceptions
 from mitmproxy import flow
 from mitmproxy import flowfilter
 from mitmproxy import http
 from mitmproxy import io
+from mitmproxy import tcp
+from mitmproxy import udp
+from mitmproxy.log import ALERT
 
 
 @lru_cache
@@ -24,7 +31,7 @@ def _path(path: str) -> str:
 
 
 @lru_cache
-def _mode(path: str) -> typing.Literal["ab", "wb"]:
+def _mode(path: str) -> Literal["ab", "wb"]:
     """Extract the writing mode (overwrite or append) from a path spec"""
     if path.startswith("+"):
         return "ab"
@@ -34,24 +41,28 @@ def _mode(path: str) -> typing.Literal["ab", "wb"]:
 
 class Save:
     def __init__(self) -> None:
-        self.stream: typing.Optional[io.FilteredFlowWriter] = None
-        self.filt: typing.Optional[flowfilter.TFilter] = None
-        self.active_flows: typing.Set[flow.Flow] = set()
-        self.current_path: typing.Optional[str] = None
+        self.stream: Optional[io.FilteredFlowWriter] = None
+        self.filt: Optional[flowfilter.TFilter] = None
+        self.active_flows: set[flow.Flow] = set()
+        self.current_path: Optional[str] = None
 
     def load(self, loader):
         loader.add_option(
-            "save_stream_file", typing.Optional[str], None,
+            "save_stream_file",
+            Optional[str],
+            None,
             """
             Stream flows to file as they arrive. Prefix path with + to append.
             The full path can use python strftime() formating, missing
             directories are created as needed. A new file is opened every time
             the formatted string changes.
-            """
+            """,
         )
         loader.add_option(
-            "save_stream_filter", typing.Optional[str], None,
-            "Filter which flows are written to file."
+            "save_stream_filter",
+            Optional[str],
+            None,
+            "Filter which flows are written to file.",
         )
 
     def configure(self, updated):
@@ -69,6 +80,7 @@ class Save:
                     self.maybe_rotate_to_new_file()
                 except OSError as e:
                     raise exceptions.OptionsError(str(e)) from e
+                assert self.stream
                 self.stream.flt = self.filt
             else:
                 self.done()
@@ -118,10 +130,10 @@ class Save:
             self.stream = None
 
     @command.command("save.file")
-    def save(self, flows: typing.Sequence[flow.Flow], path: mitmproxy.types.Path) -> None:
+    def save(self, flows: Sequence[flow.Flow], path: mitmproxy.types.Path) -> None:
         """
-            Save flows to a file. If the path starts with a +, flows are
-            appended to the file, otherwise it is over-written.
+        Save flows to a file. If the path starts with a +, flows are
+        appended to the file, otherwise it is over-written.
         """
         try:
             with open(_path(path), _mode(path)) as f:
@@ -130,24 +142,34 @@ class Save:
                     stream.add(i)
         except OSError as e:
             raise exceptions.CommandError(e) from e
-        ctx.log.alert(f"Saved {len(flows)} flows.")
+        logging.log(ALERT, f"Saved {len(flows)} flows.")
 
     def tcp_start(self, flow: tcp.TCPFlow):
         if self.stream:
             self.active_flows.add(flow)
 
     def tcp_end(self, flow: tcp.TCPFlow):
-        if self.stream:
-            self.save_flow(flow)
+        self.save_flow(flow)
 
     def tcp_error(self, flow: tcp.TCPFlow):
         self.tcp_end(flow)
+
+    def udp_start(self, flow: udp.UDPFlow):
+        if self.stream:
+            self.active_flows.add(flow)
+
+    def udp_end(self, flow: udp.UDPFlow):
+        self.save_flow(flow)
+
+    def udp_error(self, flow: udp.UDPFlow):
+        self.udp_end(flow)
 
     def websocket_end(self, flow: http.HTTPFlow):
         self.save_flow(flow)
 
     def request(self, flow: http.HTTPFlow):
-        self.active_flows.add(flow)
+        if self.stream:
+            self.active_flows.add(flow)
 
     def response(self, flow: http.HTTPFlow):
         # websocket flows will receive a websocket_end,
@@ -157,3 +179,13 @@ class Save:
 
     def error(self, flow: http.HTTPFlow):
         self.response(flow)
+
+    def dns_request(self, flow: dns.DNSFlow):
+        if self.stream:
+            self.active_flows.add(flow)
+
+    def dns_response(self, flow: dns.DNSFlow):
+        self.save_flow(flow)
+
+    def dns_error(self, flow: dns.DNSFlow):
+        self.save_flow(flow)

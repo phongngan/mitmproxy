@@ -1,21 +1,20 @@
 """Handle flows as command arguments."""
-import typing
+import logging
+from collections.abc import Sequence
 
 from mitmproxy import command
-from mitmproxy import ctx
 from mitmproxy import flow
 from mitmproxy import http
+from mitmproxy.log import ALERT
 
 
 class MyAddon:
     @command.command("myaddon.addheader")
-    def addheader(self, flows: typing.Sequence[flow.Flow]) -> None:
+    def addheader(self, flows: Sequence[flow.Flow]) -> None:
         for f in flows:
             if isinstance(f, http.HTTPFlow):
                 f.request.headers["myheader"] = "value"
-        ctx.log.alert("done")
+        logging.log(ALERT, "done")
 
 
-addons = [
-    MyAddon()
-]
+addons = [MyAddon()]

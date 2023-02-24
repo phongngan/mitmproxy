@@ -1,19 +1,21 @@
+import argparse
 import copy
 import io
-import pytest
-import typing
-import argparse
+from collections.abc import Sequence
+from typing import Optional
 
+import pytest
+
+from mitmproxy import exceptions
 from mitmproxy import options
 from mitmproxy import optmanager
-from mitmproxy import exceptions
 
 
 class TO(optmanager.OptManager):
     def __init__(self):
         super().__init__()
-        self.add_option("one", typing.Optional[int], None, "help")
-        self.add_option("two", typing.Optional[int], 2, "help")
+        self.add_option("one", Optional[int], None, "help")
+        self.add_option("two", Optional[int], 2, "help")
         self.add_option("bool", bool, False, "help")
         self.add_option("required_int", int, 2, "help")
 
@@ -35,8 +37,8 @@ class TD2(TD):
 class TM(optmanager.OptManager):
     def __init__(self):
         super().__init__()
-        self.add_option("two", typing.Sequence[str], ["foo"], "help")
-        self.add_option("one", typing.Optional[str], None, "help")
+        self.add_option("two", Sequence[str], ["foo"], "help")
+        self.add_option("one", Optional[str], None, "help")
 
 
 def test_defaults():
@@ -89,17 +91,17 @@ def test_options():
     assert o.one == 1
 
     with pytest.raises(TypeError):
-        TO(nonexistent = "value")
+        TO(nonexistent="value")
     with pytest.raises(Exception, match="Unknown options"):
         o.nonexistent = "value"
     with pytest.raises(Exception, match="Unknown options"):
-        o.update(nonexistent = "value")
-    assert o.update_known(nonexistent = "value") == {"nonexistent": "value"}
+        o.update(nonexistent="value")
+    assert o.update_known(nonexistent="value") == {"nonexistent": "value"}
 
     rec = []
 
-    def sub(opts, updated):
-        rec.append(copy.copy(opts))
+    def sub(updated):
+        rec.append(copy.copy(o))
 
     o.changed.connect(sub)
 
@@ -157,7 +159,7 @@ def test_subscribe():
     else:
         raise AssertionError
 
-    assert len(o.changed.receivers) == 0
+    assert len(o._subscriptions) == 0
 
     o.subscribe(r, ["two"])
     o.one = 2
@@ -168,7 +170,7 @@ def test_subscribe():
     assert len(o.changed.receivers) == 1
     del r
     o.two = 4
-    assert len(o.changed.receivers) == 0
+    assert len(o._subscriptions) == 0
 
     class binder:
         def __init__(self):
@@ -191,18 +193,18 @@ def test_rollback():
 
     rec = []
 
-    def sub(opts, updated):
-        rec.append(copy.copy(opts))
+    def sub(updated):
+        rec.append(copy.copy(o))
 
     recerr = []
 
-    def errsub(opts, **kwargs):
+    def errsub(**kwargs):
         recerr.append(kwargs)
 
-    def err(opts, updated):
-        if opts.one == 10:
+    def err(updated):
+        if o.one == 10:
             raise exceptions.OptionsError()
-        if opts.bool is True:
+        if o.bool is True:
             raise exceptions.OptionsError()
 
     o.changed.connect(sub)
@@ -231,8 +233,12 @@ def test_rollback():
 
 
 def test_simple():
-    assert repr(TO())
-    assert "one" in TO()
+    o = TO()
+    assert repr(o)
+    assert "one" in o
+
+    with pytest.raises(Exception, match="No such option"):
+        assert o.unknown
 
 
 def test_items():
@@ -240,7 +246,9 @@ def test_items():
 
 
 def test_serialize():
-    def serialize(opts: optmanager.OptManager, text: str, defaults: bool = False) -> str:
+    def serialize(
+        opts: optmanager.OptManager, text: str, defaults: bool = False
+    ) -> str:
         buf = io.StringIO()
         optmanager.serialize(opts, buf, text, defaults)
         return buf.getvalue()
@@ -305,24 +313,24 @@ def test_saving(tmpdir):
     optmanager.load_paths(o, dst)
     assert o.three == "foo"
 
-    with open(dst, 'a') as f:
+    with open(dst, "a") as f:
         f.write("foobar: '123'")
     optmanager.load_paths(o, dst)
     assert o.deferred == {"foobar": "123"}
 
-    with open(dst, 'a') as f:
+    with open(dst, "a") as f:
         f.write("'''")
     with pytest.raises(exceptions.OptionsError):
         optmanager.load_paths(o, dst)
 
-    with open(dst, 'wb') as f:
+    with open(dst, "wb") as f:
         f.write(b"\x01\x02\x03")
     with pytest.raises(exceptions.OptionsError):
         optmanager.load_paths(o, dst)
     with pytest.raises(exceptions.OptionsError):
         optmanager.save(o, dst)
 
-    with open(dst, 'wb') as f:
+    with open(dst, "wb") as f:
         f.write(b"\xff\xff\xff")
     with pytest.raises(exceptions.OptionsError):
         optmanager.load_paths(o, dst)
@@ -364,7 +372,7 @@ def test_dump_defaults():
 def test_dump_dicts():
     o = options.Options()
     assert optmanager.dump_dicts(o)
-    assert optmanager.dump_dicts(o, ['http2', 'listen_port'])
+    assert optmanager.dump_dicts(o, ["http2", "listen_port"])
 
 
 class TTypes(optmanager.OptManager):
@@ -372,12 +380,12 @@ class TTypes(optmanager.OptManager):
         super().__init__()
         self.add_option("str", str, "str", "help")
         self.add_option("choices", str, "foo", "help", ["foo", "bar", "baz"])
-        self.add_option("optstr", typing.Optional[str], "optstr", "help")
+        self.add_option("optstr", Optional[str], "optstr", "help")
         self.add_option("bool", bool, False, "help")
         self.add_option("bool_on", bool, True, "help")
         self.add_option("int", int, 0, "help")
-        self.add_option("optint", typing.Optional[int], 0, "help")
-        self.add_option("seqstr", typing.Sequence[str], [], "help")
+        self.add_option("optint", Optional[int], 0, "help")
+        self.add_option("seqstr", Sequence[str], [], "help")
         self.add_option("unknown", float, 0.0, "help")
 
 
@@ -453,11 +461,11 @@ def test_set():
     assert "deferredoption" not in opts.deferred
     assert opts.deferredoption == "wobble"
 
-    opts.set(*('deferredsequenceoption=a', 'deferredsequenceoption=b'), defer=True)
+    opts.set(*("deferredsequenceoption=a", "deferredsequenceoption=b"), defer=True)
     assert "deferredsequenceoption" in opts.deferred
     opts.process_deferred()
     assert "deferredsequenceoption" in opts.deferred
-    opts.add_option("deferredsequenceoption", typing.Sequence[str], [], "help")
+    opts.add_option("deferredsequenceoption", Sequence[str], [], "help")
     opts.process_deferred()
     assert "deferredsequenceoption" not in opts.deferred
     assert opts.deferredsequenceoption == ["a", "b"]

@@ -1,9 +1,13 @@
-from typing import Any, Callable, Dict, Iterator, Type
+from collections.abc import Iterator
+from typing import Any
+from typing import Callable
 
+from mitmproxy import dns
 from mitmproxy import flow
 from mitmproxy import hooks
 from mitmproxy import http
 from mitmproxy import tcp
+from mitmproxy import udp
 from mitmproxy.proxy import layers
 
 TEventGenerator = Iterator[hooks.Hook]
@@ -41,9 +45,33 @@ def _iterate_tcp(f: tcp.TCPFlow) -> TEventGenerator:
         yield layers.tcp.TcpEndHook(f)
 
 
-_iterate_map: Dict[Type[flow.Flow], Callable[[Any], TEventGenerator]] = {
+def _iterate_udp(f: udp.UDPFlow) -> TEventGenerator:
+    messages = f.messages
+    f.messages = []
+    yield layers.udp.UdpStartHook(f)
+    while messages:
+        f.messages.append(messages.pop(0))
+        yield layers.udp.UdpMessageHook(f)
+    if f.error:
+        yield layers.udp.UdpErrorHook(f)
+    else:
+        yield layers.udp.UdpEndHook(f)
+
+
+def _iterate_dns(f: dns.DNSFlow) -> TEventGenerator:
+    if f.request:
+        yield layers.dns.DnsRequestHook(f)
+    if f.response:
+        yield layers.dns.DnsResponseHook(f)
+    if f.error:
+        yield layers.dns.DnsErrorHook(f)
+
+
+_iterate_map: dict[type[flow.Flow], Callable[[Any], TEventGenerator]] = {
     http.HTTPFlow: _iterate_http,
     tcp.TCPFlow: _iterate_tcp,
+    udp.UDPFlow: _iterate_udp,
+    dns.DNSFlow: _iterate_dns,
 }
 
 

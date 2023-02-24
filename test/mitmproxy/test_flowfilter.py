@@ -1,12 +1,14 @@
 import io
-import pytest
 from unittest.mock import patch
+
+import pytest
+
+from mitmproxy import flowfilter
+from mitmproxy import http
 from mitmproxy.test import tflow
-from mitmproxy import flowfilter, http
 
 
 class TestParsing:
-
     def _dump(self, x):
         c = io.StringIO()
         x.dump(fp=c)
@@ -86,7 +88,6 @@ class TestParsing:
 
 
 class TestMatchingHTTPFlow:
-
     def req(self):
         return tflow.tflow()
 
@@ -154,7 +155,7 @@ class TestMatchingHTTPFlow:
         t = tflow.tflow()
         t.marked = ":default:"
         assert not self.q("~marker X", t)
-        t.marked = 'X'
+        t.marked = "X"
         assert self.q("~marker X", t)
 
     def test_head(self):
@@ -189,30 +190,30 @@ class TestMatchingHTTPFlow:
         assert not self.q("~bq message", q)
         assert not self.q("~bq message", s)
 
-        s.response.text = 'яч'           # Cyrillic
+        s.response.text = "яч"  # Cyrillic
         assert self.q("~bs яч", s)
-        s.response.text = '测试'          # Chinese
-        assert self.q('~bs 测试', s)
-        s.response.text = 'ॐ'            # Hindi
-        assert self.q('~bs ॐ', s)
-        s.response.text = 'لله'           # Arabic
-        assert self.q('~bs لله', s)
-        s.response.text = 'θεός'          # Greek
-        assert self.q('~bs θεός', s)
-        s.response.text = 'לוהים'          # Hebrew
-        assert self.q('~bs לוהים', s)
-        s.response.text = '神'            # Japanese
-        assert self.q('~bs 神', s)
-        s.response.text = '하나님'         # Korean
-        assert self.q('~bs 하나님', s)
-        s.response.text = 'Äÿ'            # Latin
-        assert self.q('~bs Äÿ', s)
+        s.response.text = "测试"  # Chinese
+        assert self.q("~bs 测试", s)
+        s.response.text = "ॐ"  # Hindi
+        assert self.q("~bs ॐ", s)
+        s.response.text = "لله"  # Arabic
+        assert self.q("~bs لله", s)
+        s.response.text = "θεός"  # Greek
+        assert self.q("~bs θεός", s)
+        s.response.text = "לוהים"  # Hebrew
+        assert self.q("~bs לוהים", s)
+        s.response.text = "神"  # Japanese
+        assert self.q("~bs 神", s)
+        s.response.text = "하나님"  # Korean
+        assert self.q("~bs 하나님", s)
+        s.response.text = "Äÿ"  # Latin
+        assert self.q("~bs Äÿ", s)
 
         assert not self.q("~bs nomatch", s)
         assert not self.q("~bs content", q)
         assert not self.q("~bs content", s)
         assert not self.q("~bs message", q)
-        s.response.text = 'message'
+        s.response.text = "message"
         assert self.q("~bs message", s)
 
     def test_body(self):
@@ -268,9 +269,9 @@ class TestMatchingHTTPFlow:
         assert self.q("~src 127.0.0.1:22", q)
 
         q.client_conn.peername = None
-        assert not self.q('~src address:22', q)
+        assert not self.q("~src address:22", q)
         q.client_conn = None
-        assert not self.q('~src address:22', q)
+        assert not self.q("~src address:22", q)
 
     def test_dst(self):
         q = self.req()
@@ -282,9 +283,9 @@ class TestMatchingHTTPFlow:
         assert self.q("~dst address:22", q)
 
         q.server_conn.address = None
-        assert not self.q('~dst address:22', q)
+        assert not self.q("~dst address:22", q)
         q.server_conn = None
-        assert not self.q('~dst address:22', q)
+        assert not self.q("~dst address:22", q)
 
     def test_and(self):
         s = self.resp()
@@ -331,12 +332,65 @@ class TestMatchingHTTPFlow:
         assert self.q("~meta string", f)
         assert self.q("~meta key", f)
         assert self.q("~meta value", f)
-        assert self.q("~meta \"b: string\"", f)
+        assert self.q('~meta "b: string"', f)
         assert self.q("~meta \"'key': 'value'\"", f)
 
 
-class TestMatchingTCPFlow:
+class TestMatchingDNSFlow:
+    def req(self):
+        return tflow.tdnsflow()
 
+    def resp(self):
+        return tflow.tdnsflow(resp=True)
+
+    def err(self):
+        return tflow.tdnsflow(err=True)
+
+    def q(self, q, o):
+        return flowfilter.parse(q)(o)
+
+    def test_dns(self):
+        s = self.req()
+        assert self.q("~dns", s)
+        assert not self.q("~http", s)
+        assert not self.q("~tcp", s)
+
+    def test_freq_fresp(self):
+        q = self.req()
+        s = self.resp()
+
+        assert self.q("~q", q)
+        assert not self.q("~q", s)
+
+        assert not self.q("~s", q)
+        assert self.q("~s", s)
+
+    def test_ferr(self):
+        e = self.err()
+        assert self.q("~e", e)
+
+    def test_body(self):
+        q = self.req()
+        s = self.resp()
+        assert not self.q("~b nonexistent", q)
+        assert self.q("~b dns.google", q)
+        assert self.q("~b 8.8.8.8", s)
+
+        assert not self.q("~bq 8.8.8.8", s)
+        assert self.q("~bq dns.google", q)
+        assert self.q("~bq dns.google", s)
+
+        assert not self.q("~bs dns.google", q)
+        assert self.q("~bs dns.google", s)
+        assert self.q("~bs 8.8.8.8", s)
+
+    def test_url(self):
+        f = self.req()
+        assert not self.q("~u whatever", f)
+        assert self.q("~u dns.google", f)
+
+
+class TestMatchingTCPFlow:
     def flow(self):
         return tflow.ttcpflow()
 
@@ -349,6 +403,132 @@ class TestMatchingTCPFlow:
     def test_tcp(self):
         f = self.flow()
         assert self.q("~tcp", f)
+        assert not self.q("~udp", f)
+        assert not self.q("~http", f)
+        assert not self.q("~websocket", f)
+
+    def test_ferr(self):
+        e = self.err()
+        assert self.q("~e", e)
+
+    def test_body(self):
+        f = self.flow()
+
+        # Messages sent by client or server
+        assert self.q("~b hello", f)
+        assert self.q("~b me", f)
+        assert not self.q("~b nonexistent", f)
+
+        # Messages sent by client
+        assert self.q("~bq hello", f)
+        assert not self.q("~bq me", f)
+        assert not self.q("~bq nonexistent", f)
+
+        # Messages sent by server
+        assert self.q("~bs me", f)
+        assert not self.q("~bs hello", f)
+        assert not self.q("~bs nonexistent", f)
+
+    def test_src(self):
+        f = self.flow()
+        assert self.q("~src 127.0.0.1", f)
+        assert not self.q("~src foobar", f)
+        assert self.q("~src :22", f)
+        assert not self.q("~src :99", f)
+        assert self.q("~src 127.0.0.1:22", f)
+
+    def test_dst(self):
+        f = self.flow()
+        f.server_conn = tflow.tserver_conn()
+        assert self.q("~dst address", f)
+        assert not self.q("~dst foobar", f)
+        assert self.q("~dst :22", f)
+        assert not self.q("~dst :99", f)
+        assert self.q("~dst address:22", f)
+
+    def test_and(self):
+        f = self.flow()
+        f.server_conn = tflow.tserver_conn()
+        assert self.q("~b hello & ~b me", f)
+        assert not self.q("~src wrongaddress & ~b hello", f)
+        assert self.q("(~src :22 & ~dst :22) & ~b hello", f)
+        assert not self.q("(~src address:22 & ~dst :22) & ~b nonexistent", f)
+        assert not self.q("(~src address:22 & ~dst :99) & ~b hello", f)
+
+    def test_or(self):
+        f = self.flow()
+        f.server_conn = tflow.tserver_conn()
+        assert self.q("~b hello | ~b me", f)
+        assert self.q("~src :22 | ~b me", f)
+        assert not self.q("~src :99 | ~dst :99", f)
+        assert self.q("(~src :22 | ~dst :22) | ~b me", f)
+
+    def test_not(self):
+        f = self.flow()
+        assert not self.q("! ~src :22", f)
+        assert self.q("! ~src :99", f)
+        assert self.q("!~src :99 !~src :99", f)
+        assert not self.q("!~src :99 !~src :22", f)
+
+    def test_request(self):
+        f = self.flow()
+        assert not self.q("~q", f)
+
+    def test_response(self):
+        f = self.flow()
+        assert not self.q("~s", f)
+
+    def test_headers(self):
+        f = self.flow()
+        assert not self.q("~h whatever", f)
+
+        # Request headers
+        assert not self.q("~hq whatever", f)
+
+        # Response headers
+        assert not self.q("~hs whatever", f)
+
+    def test_content_type(self):
+        f = self.flow()
+        assert not self.q("~t whatever", f)
+
+        # Request content-type
+        assert not self.q("~tq whatever", f)
+
+        # Response content-type
+        assert not self.q("~ts whatever", f)
+
+    def test_code(self):
+        f = self.flow()
+        assert not self.q("~c 200", f)
+
+    def test_domain(self):
+        f = self.flow()
+        assert not self.q("~d whatever", f)
+
+    def test_method(self):
+        f = self.flow()
+        assert not self.q("~m whatever", f)
+
+    def test_url(self):
+        f = self.flow()
+        assert not self.q("~u whatever", f)
+
+
+class TestMatchingUDPFlow:
+    def flow(self):
+        return tflow.tudpflow()
+
+    def err(self):
+        return tflow.tudpflow(err=True)
+
+    def q(self, q, o):
+        return flowfilter.parse(q)(o)
+
+    def test_udp(self):
+        f = self.flow()
+        assert self.q("~udp", f)
+        assert not self.q("~tcp", f)
         assert not self.q("~http", f)
         assert not self.q("~websocket", f)
 
@@ -461,7 +641,6 @@ class TestMatchingTCPFlow:
 
 
 class TestMatchingWebSocketFlow:
-
     def flow(self) -> http.HTTPFlow:
         return tflow.twebsocketflow()
 
@@ -557,7 +736,6 @@ class TestMatchingWebSocketFlow:
 
 
 class TestMatchingDummyFlow:
-
     def flow(self):
         return tflow.tdummyflow()
 
@@ -620,7 +798,7 @@ class TestMatchingDummyFlow:
         assert self.q("~comment .", f)
 
 
-@patch('traceback.extract_tb')
+@patch("traceback.extract_tb")
 def test_pyparsing_bug(extract_tb):
     """https://github.com/mitmproxy/mitmproxy/issues/1087"""
     # The text is a string with leading and trailing whitespace stripped; if the source is not available it is None.
@@ -630,7 +808,7 @@ def test_pyparsing_bug(extract_tb):
 
 def test_match():
     with pytest.raises(ValueError):
-        flowfilter.match('[foobar', None)
+        flowfilter.match("[foobar", None)
 
     assert flowfilter.match(None, None)
-    assert not flowfilter.match('foobar', None)
+    assert not flowfilter.match("foobar", None)

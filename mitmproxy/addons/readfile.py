@@ -1,31 +1,30 @@
 import asyncio
+import logging
 import os.path
 import sys
-import typing
+from typing import BinaryIO
+from typing import Optional
 
+from mitmproxy import command
 from mitmproxy import ctx
 from mitmproxy import exceptions
 from mitmproxy import flowfilter
 from mitmproxy import io
-from mitmproxy import command
 
 
 class ReadFile:
     """
-        An addon that handles reading from file on startup.
+    An addon that handles reading from file on startup.
     """
+
     def __init__(self):
         self.filter = None
         self.is_reading = False
 
     def load(self, loader):
+        loader.add_option("rfile", Optional[str], None, "Read flows from file.")
         loader.add_option(
-            "rfile", typing.Optional[str], None,
-            "Read flows from file."
-        )
-        loader.add_option(
-            "readfile_filter", typing.Optional[str], None,
-            "Read only matching flows."
+            "readfile_filter", Optional[str], None, "Read only matching flows."
         )
 
     def configure(self, updated):
@@ -38,7 +37,7 @@ class ReadFile:
             else:
                 self.filter = None
 
-    async def load_flows(self, fo: typing.IO[bytes]) -> int:
+    async def load_flows(self, fo: BinaryIO) -> int:
         cnt = 0
         freader = io.FlowReader(fo)
         try:
@@ -49,9 +48,9 @@ class ReadFile:
                 cnt += 1
         except (OSError, exceptions.FlowReadException) as e:
             if cnt:
-                ctx.log.warn("Flow file corrupted - loaded %i flows." % cnt)
+                logging.warning("Flow file corrupted - loaded %i flows." % cnt)
             else:
-                ctx.log.error("Flow file corrupted.")
+                logging.error("Flow file corrupted.")
             raise exceptions.FlowReadException(str(e)) from e
         else:
             return cnt
@@ -62,7 +61,7 @@ class ReadFile:
             with open(path, "rb") as f:
                 return await self.load_flows(f)
         except OSError as e:
-            ctx.log.error(f"Cannot load flows: {e}")
+            logging.error(f"Cannot load flows: {e}")
             raise exceptions.FlowReadException(str(e)) from e
 
     async def doread(self, rfile):
@@ -85,6 +84,7 @@ class ReadFile:
 
 class ReadFileStdin(ReadFile):
     """Support the special case of "-" for reading from stdin"""
+
     async def load_flows_from_path(self, path: str) -> int:
         if path == "-":  # pragma: no cover
             # Need to think about how to test this. This function is scheduled

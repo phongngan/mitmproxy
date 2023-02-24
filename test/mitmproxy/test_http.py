@@ -1,21 +1,26 @@
 import asyncio
 import email
-import time
 import json
+import time
+from typing import Any
 from unittest import mock
 
 import pytest
 
 from mitmproxy import flow
 from mitmproxy import flowfilter
-from mitmproxy.http import Headers, Request, Response, HTTPFlow
+from mitmproxy.http import Headers
+from mitmproxy.http import HTTPFlow
+from mitmproxy.http import Message
+from mitmproxy.http import Request
+from mitmproxy.http import Response
 from mitmproxy.net.http.cookies import CookieAttrs
 from mitmproxy.test.tflow import tflow
-from mitmproxy.test.tutils import treq, tresp
+from mitmproxy.test.tutils import treq
+from mitmproxy.test.tutils import tresp
 
 
 class TestRequest:
-
     def test_simple(self):
         f = tflow()
         r = f.request
@@ -155,7 +160,9 @@ class TestRequestCore:
         _test_decoded_attr(treq(), "scheme")
 
     def test_port(self):
-        _test_passthrough_attr(treq(), "port")
+        _test_passthrough_attr(treq(), "port", 1234)
+        with pytest.raises(ValueError):
+            treq().port = "foo"
 
     def test_path(self):
         _test_decoded_attr(treq(), "path")
@@ -196,8 +203,7 @@ class TestRequestCore:
         request.headers["Host"] = "foo"
         request.authority = "foo"
         request.host = "example.org"
-        assert request.headers["Host"] == "example.org"
-        assert request.authority == "example.org:22"
+        assert request.headers["Host"] == request.authority == "example.org:22"
 
     def test_get_host_header(self):
         no_hdr = treq()
@@ -205,7 +211,7 @@ class TestRequestCore:
 
         h1 = treq(
             headers=((b"host", b"header.example.com"),),
-            authority=b"authority.example.com"
+            authority=b"authority.example.com",
         )
         assert h1.host_header == "header.example.com"
 
@@ -316,7 +322,7 @@ class TestRequestUtils:
         request.query["foo"] = "bar"
         assert request.query["foo"] == "bar"
         assert request.path == "/path?foo=bar"
-        request.query = [('foo', 'bar')]
+        request.query = [("foo", "bar")]
         assert request.query["foo"] == "bar"
         assert request.path == "/path?foo=bar"
 
@@ -329,23 +335,27 @@ class TestRequestUtils:
         request = treq()
         request.headers = Headers(cookie="cookiename=cookievalue")
         assert len(request.cookies) == 1
-        assert request.cookies['cookiename'] == 'cookievalue'
+        assert request.cookies["cookiename"] == "cookievalue"
 
     def test_get_cookies_double(self):
         request = treq()
-        request.headers = Headers(cookie="cookiename=cookievalue;othercookiename=othercookievalue")
+        request.headers = Headers(
+            cookie="cookiename=cookievalue;othercookiename=othercookievalue"
+        )
         result = request.cookies
         assert len(result) == 2
-        assert result['cookiename'] == 'cookievalue'
-        assert result['othercookiename'] == 'othercookievalue'
+        assert result["cookiename"] == "cookievalue"
+        assert result["othercookiename"] == "othercookievalue"
 
     def test_get_cookies_withequalsign(self):
         request = treq()
-        request.headers = Headers(cookie="cookiename=coo=kievalue;othercookiename=othercookievalue")
+        request.headers = Headers(
+            cookie="cookiename=coo=kievalue;othercookiename=othercookievalue"
+        )
         result = request.cookies
         assert len(result) == 2
-        assert result['cookiename'] == 'coo=kievalue'
-        assert result['othercookiename'] == 'othercookievalue'
+        assert result["cookiename"] == "coo=kievalue"
+        assert result["othercookiename"] == "othercookievalue"
 
     def test_set_cookies(self):
         request = treq()
@@ -413,7 +423,7 @@ class TestRequestUtils:
 
     def test_set_urlencoded_form(self):
         request = treq(content=b"\xec\xed")
-        request.urlencoded_form = [('foo', 'bar'), ('rab', 'oof')]
+        request.urlencoded_form = [("foo", "bar"), ("rab", "oof")]
         assert request.headers["Content-Type"] == "application/x-www-form-urlencoded"
         assert request.content
 
@@ -424,19 +434,21 @@ class TestRequestUtils:
         request.headers["Content-Type"] = "multipart/form-data"
         assert list(request.multipart_form.items()) == []
 
-        with mock.patch('mitmproxy.net.http.multipart.decode') as m:
+        with mock.patch("mitmproxy.net.http.multipart.decode_multipart") as m:
             m.side_effect = ValueError
             assert list(request.multipart_form.items()) == []
 
     def test_set_multipart_form(self):
         request = treq()
         request.multipart_form = [(b"file", b"shell.jpg"), (b"file_size", b"1000")]
-        assert request.headers["Content-Type"].startswith('multipart/form-data')
-        assert list(request.multipart_form.items()) == [(b"file", b"shell.jpg"), (b"file_size", b"1000")]
+        assert request.headers["Content-Type"].startswith("multipart/form-data")
+        assert list(request.multipart_form.items()) == [
+            (b"file", b"shell.jpg"),
+            (b"file_size", b"1000"),
+        ]
 
 
 class TestResponse:
-
     def test_simple(self):
         f = tflow(resp=True)
         resp = f.response
@@ -517,7 +529,7 @@ class TestResponseCore:
         resp.reason = b"DEF"
         assert resp.data.reason == b"DEF"
 
-        resp.data.reason = b'cr\xe9e'
+        resp.data.reason = b"cr\xe9e"
         assert resp.reason == "crée"
 
 
@@ -561,7 +573,9 @@ class TestResponseUtils:
 
     def test_get_cookies_no_value(self):
         resp = tresp()
-        resp.headers = Headers(set_cookie="cookiename=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; path=/")
+        resp.headers = Headers(
+            set_cookie="cookiename=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; path=/"
+        )
         result = resp.cookies
         assert len(result) == 1
         assert "cookiename" in result
@@ -570,10 +584,12 @@ class TestResponseUtils:
 
     def test_get_cookies_twocookies(self):
         resp = tresp()
-        resp.headers = Headers([
-            [b"Set-Cookie", b"cookiename=cookievalue"],
-            [b"Set-Cookie", b"othercookie=othervalue"]
-        ])
+        resp.headers = Headers(
+            [
+                [b"Set-Cookie", b"cookiename=cookievalue"],
+                [b"Set-Cookie", b"othercookie=othervalue"],
+            ]
+        )
         result = resp.cookies
         assert len(result) == 2
         assert "cookiename" in result
@@ -586,7 +602,10 @@ class TestResponseUtils:
         resp.cookies["foo"] = ("bar", {})
         assert len(resp.cookies) == 1
         assert resp.cookies["foo"] == ("bar", CookieAttrs())
-        resp.cookies = [["one", ("uno", CookieAttrs())], ["two", ("due", CookieAttrs())]]
+        resp.cookies = [
+            ["one", ("uno", CookieAttrs())],
+            ["two", ("due", CookieAttrs())],
+        ]
         assert list(resp.cookies.keys()) == ["one", "two"]
 
     def test_refresh(self):
@@ -609,7 +628,7 @@ class TestResponseUtils:
         # Cookie refreshing is tested in test_cookies, we just make sure that it's triggered here.
         assert cookie != r.headers["set-cookie"]
 
-        with mock.patch('mitmproxy.net.http.cookies.refresh_set_cookie_header') as m:
+        with mock.patch("mitmproxy.net.http.cookies.refresh_set_cookie_header") as m:
             m.side_effect = ValueError
             r.refresh(n)
 
@@ -620,7 +639,6 @@ class TestResponseUtils:
 
 
 class TestHTTPFlow:
-
     def test_copy(self):
         f = tflow(resp=True)
         assert repr(f)
@@ -682,14 +700,12 @@ class TestHTTPFlow:
     def test_getset_state(self):
         f = tflow(resp=True)
         state = f.get_state()
-        assert f.get_state() == HTTPFlow.from_state(
-            state).get_state()
+        assert f.get_state() == HTTPFlow.from_state(state).get_state()
 
         f.response = None
         f.error = flow.Error("error")
         state = f.get_state()
-        assert f.get_state() == HTTPFlow.from_state(
-            state).get_state()
+        assert f.get_state() == HTTPFlow.from_state(state).get_state()
 
         f2 = f.copy()
         f2.id = f.id  # copy creates a different uuid
@@ -776,12 +792,7 @@ class TestHTTPFlow:
 
 class TestHeaders:
     def _2host(self):
-        return Headers(
-            (
-                (b"Host", b"example.com"),
-                (b"host", b"example.org")
-            )
-        )
+        return Headers(((b"Host", b"example.com"), (b"host", b"example.org")))
 
     def test_init(self):
         headers = Headers()
@@ -795,16 +806,12 @@ class TestHeaders:
         assert len(headers) == 1
         assert headers["Host"] == "example.com"
 
-        headers = Headers(
-            [(b"Host", b"invalid")],
-            Host="example.com"
-        )
+        headers = Headers([(b"Host", b"invalid")], Host="example.com")
         assert len(headers) == 1
         assert headers["Host"] == "example.com"
 
         headers = Headers(
-            [(b"Host", b"invalid"), (b"Accept", b"text/plain")],
-            Host="example.com"
+            [(b"Host", b"invalid"), (b"Accept", b"text/plain")], Host="example.com"
         )
         assert len(headers) == 2
         assert headers["Host"] == "example.com"
@@ -826,51 +833,44 @@ class TestHeaders:
         headers = Headers(Host="example.com")
         assert bytes(headers) == b"Host: example.com\r\n"
 
-        headers = Headers([
-            (b"Host", b"example.com"),
-            (b"Accept", b"text/plain")
-        ])
+        headers = Headers([(b"Host", b"example.com"), (b"Accept", b"text/plain")])
         assert bytes(headers) == b"Host: example.com\r\nAccept: text/plain\r\n"
 
         headers = Headers()
         assert bytes(headers) == b""
 
     def test_iter(self):
-        headers = Headers([
-            (b"Set-Cookie", b"foo"),
-            (b"Set-Cookie", b"bar")
-        ])
+        headers = Headers([(b"Set-Cookie", b"foo"), (b"Set-Cookie", b"bar")])
         assert list(headers) == ["Set-Cookie"]
 
     def test_insert(self):
         headers = Headers(Accept="text/plain")
         headers.insert(0, b"Host", "example.com")
-        assert headers.fields == (
-            (b'Host', b'example.com'),
-            (b'Accept', b'text/plain')
-        )
+        assert headers.fields == ((b"Host", b"example.com"), (b"Accept", b"text/plain"))
 
     def test_items(self):
-        headers = Headers([
-            (b"Set-Cookie", b"foo"),
-            (b"Set-Cookie", b"bar"),
-            (b'Accept', b'text/plain'),
-        ])
+        headers = Headers(
+            [
+                (b"Set-Cookie", b"foo"),
+                (b"Set-Cookie", b"bar"),
+                (b"Accept", b"text/plain"),
+            ]
+        )
         assert list(headers.items()) == [
-            ('Set-Cookie', 'foo, bar'),
-            ('Accept', 'text/plain')
+            ("Set-Cookie", "foo, bar"),
+            ("Accept", "text/plain"),
         ]
         assert list(headers.items(multi=True)) == [
-            ('Set-Cookie', 'foo'),
-            ('Set-Cookie', 'bar'),
-            ('Accept', 'text/plain')
+            ("Set-Cookie", "foo"),
+            ("Set-Cookie", "bar"),
+            ("Accept", "text/plain"),
         ]
 
 
-def _test_passthrough_attr(message, attr):
+def _test_passthrough_attr(message: Message, attr: str, value: Any = b"foo") -> None:
     assert getattr(message, attr) == getattr(message.data, attr)
-    setattr(message, attr, b"foo")
-    assert getattr(message.data, attr) == b"foo"
+    setattr(message, attr, value)
+    assert getattr(message.data, attr) == value
 
 
 def _test_decoded_attr(message, attr):
@@ -879,7 +879,9 @@ def _test_decoded_attr(message, attr):
     setattr(message, attr, "foo")
     assert getattr(message.data, attr) == b"foo"
     # Set raw bytes, get decoded
-    setattr(message.data, attr, b"BAR")  # use uppercase so that we can also cover request.method
+    setattr(
+        message.data, attr, b"BAR"
+    )  # use uppercase so that we can also cover request.method
     assert getattr(message, attr) == "BAR"
     # Set bytes, get raw bytes
     setattr(message, attr, b"baz")
@@ -918,7 +920,6 @@ class TestMessageData:
 
 
 class TestMessage:
-
     def test_init(self):
         resp = tresp()
         assert resp.data
@@ -937,7 +938,9 @@ class TestMessage:
         resp = tresp()
         resp.trailers = Headers()
         resp2 = Response.from_state(resp.get_state())
-        assert resp.data == resp2.data
+        resp3 = tresp()
+        resp3.set_state(resp.get_state())
+        assert resp.data == resp2.data == resp3.data
 
     def test_content_length_update(self):
         resp = tresp()
@@ -1074,7 +1077,7 @@ class TestMessageContentEncoding:
 
 class TestMessageText:
     def test_simple(self):
-        r = tresp(content=b'\xfc')
+        r = tresp(content=b"\xfc")
         assert r.raw_content == b"\xfc"
         assert r.content == b"\xfc"
         assert r.text == "ü"
@@ -1096,29 +1099,37 @@ class TestMessageText:
         assert r.text == '"ü"'
 
     def test_guess_meta_charset(self):
-        r = tresp(content=b'<meta http-equiv="content-type" '
-                          b'content="text/html;charset=gb2312">\xe6\x98\x8e\xe4\xbc\xaf')
+        r = tresp(
+            content=b'<meta http-equiv="content-type" '
+            b'content="text/html;charset=gb2312">\xe6\x98\x8e\xe4\xbc\xaf'
+        )
         r.headers["content-type"] = "text/html"
         # "鏄庝集" is decoded form of \xe6\x98\x8e\xe4\xbc\xaf in gb18030
         assert "鏄庝集" in r.text
 
     def test_guess_css_charset(self):
         # @charset but not text/css
-        r = tresp(content=b'@charset "gb2312";'
-                          b'#foo::before {content: "\xe6\x98\x8e\xe4\xbc\xaf"}')
+        r = tresp(
+            content=b'@charset "gb2312";'
+            b'#foo::before {content: "\xe6\x98\x8e\xe4\xbc\xaf"}'
+        )
         # "鏄庝集" is decoded form of \xe6\x98\x8e\xe4\xbc\xaf in gb18030
         assert "鏄庝集" not in r.text
 
         # @charset not at the beginning
-        r = tresp(content=b'foo@charset "gb2312";'
-                          b'#foo::before {content: "\xe6\x98\x8e\xe4\xbc\xaf"}')
+        r = tresp(
+            content=b'foo@charset "gb2312";'
+            b'#foo::before {content: "\xe6\x98\x8e\xe4\xbc\xaf"}'
+        )
         r.headers["content-type"] = "text/css"
         # "鏄庝集" is decoded form of \xe6\x98\x8e\xe4\xbc\xaf in gb18030
         assert "鏄庝集" not in r.text
 
         # @charset and text/css
-        r = tresp(content=b'@charset "gb2312";'
-                          b'#foo::before {content: "\xe6\x98\x8e\xe4\xbc\xaf"}')
+        r = tresp(
+            content=b'@charset "gb2312";'
+            b'#foo::before {content: "\xe6\x98\x8e\xe4\xbc\xaf"}'
+        )
         r.headers["content-type"] = "text/css"
         # "鏄庝集" is decoded form of \xe6\x98\x8e\xe4\xbc\xaf in gb18030
         assert "鏄庝集" in r.text
@@ -1161,7 +1172,7 @@ class TestMessageText:
         with pytest.raises(ValueError):
             assert r.text
 
-        assert r.get_text(strict=False) == '\udcff'
+        assert r.get_text(strict=False) == "\udcff"
 
     def test_cannot_encode(self):
         r = tresp()
@@ -1172,20 +1183,20 @@ class TestMessageText:
         r.headers["content-type"] = "text/html; charset=latin1; foo=bar"
         r.text = "☃"
         assert r.headers["content-type"] == "text/html; charset=utf-8; foo=bar"
-        assert r.raw_content == b'\xe2\x98\x83'
+        assert r.raw_content == b"\xe2\x98\x83"
 
         r.headers["content-type"] = "gibberish"
         r.text = "☃"
         assert r.headers["content-type"] == "text/plain; charset=utf-8"
-        assert r.raw_content == b'\xe2\x98\x83'
+        assert r.raw_content == b"\xe2\x98\x83"
 
         del r.headers["content-type"]
         r.text = "☃"
         assert r.headers["content-type"] == "text/plain; charset=utf-8"
-        assert r.raw_content == b'\xe2\x98\x83'
+        assert r.raw_content == b"\xe2\x98\x83"
 
         r.headers["content-type"] = "text/html; charset=latin1"
-        r.text = '\udcff'
+        r.text = "\udcff"
         assert r.headers["content-type"] == "text/html; charset=utf-8"
         assert r.raw_content == b"\xFF"
 
@@ -1194,17 +1205,17 @@ class TestMessageText:
         with pytest.raises(TypeError):
             req.json()
 
-        req = treq(content=b'')
+        req = treq(content=b"")
         with pytest.raises(json.decoder.JSONDecodeError):
             req.json()
 
-        req = treq(content=b'{}')
+        req = treq(content=b"{}")
         assert req.json() == {}
 
         req = treq(content=b'{"a": 1}')
         assert req.json() == {"a": 1}
 
-        req = treq(content=b'{')
+        req = treq(content=b"{")
 
         with pytest.raises(json.decoder.JSONDecodeError):
             req.json()

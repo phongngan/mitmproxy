@@ -1,7 +1,10 @@
 import gc
 import threading
-from pympler import muppy, refbrowser
+
 from OpenSSL import SSL
+from pympler import muppy
+from pympler import refbrowser
+
 # import os
 # os.environ["TK_LIBRARY"] = r"C:\Python27\tcl\tcl8.5"
 # os.environ["TCL_LIBRARY"] = r"C:\Python27\tcl\tcl8.5"
@@ -18,7 +21,11 @@ def str_fun(obj):
             return "(-locals-)"
         if "self" in obj and isinstance(obj["self"], refbrowser.InteractiveBrowser):
             return "(-browser-)"
-    return str(id(obj)) + ": " + str(obj)[:100].replace("\r\n", "\\r\\n").replace("\n", "\\n")
+    return (
+        str(id(obj))
+        + ": "
+        + str(obj)[:100].replace("\r\n", "\\r\\n").replace("\n", "\\n")
+    )
 
 
 def request(ctx, flow):

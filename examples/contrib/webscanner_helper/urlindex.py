@@ -3,7 +3,8 @@ import datetime
 import json
 import logging
 from pathlib import Path
-from typing import Type, Dict, Union, Optional
+from typing import Optional
+from typing import Union
 
 from mitmproxy import flowfilter
 from mitmproxy.http import HTTPFlow
@@ -29,12 +30,10 @@ class UrlIndexWriter(abc.ABC):
     @abc.abstractmethod
     def load(self):
         """Load existing URL index."""
-        pass
 
     @abc.abstractmethod
     def add_url(self, flow: HTTPFlow):
         """Add new URL to URL index."""
-        pass
 
     @abc.abstractmethod
     def save(self):
@@ -69,7 +68,9 @@ class JSONUrlIndexWriter(UrlIndexWriter):
         res = flow.response
 
         if req is not None and res is not None:
-            urls = self.host_urls.setdefault(f"{req.scheme}://{req.host}:{req.port}", dict())
+            urls = self.host_urls.setdefault(
+                f"{req.scheme}://{req.host}:{req.port}", dict()
+            )
             methods = urls.setdefault(req.path, {})
             codes = methods.setdefault(req.method, set())
             codes.add(res.status_code)
@@ -90,14 +91,16 @@ class TextUrlIndexWriter(UrlIndexWriter):
         req = flow.request
         if res is not None and req is not None:
             with self.filepath.open("a+") as f:
-                f.write(f"{datetime.datetime.utcnow().isoformat()} STATUS: {res.status_code} METHOD: "
-                        f"{req.method} URL:{req.url}\n")
+                f.write(
+                    f"{datetime.datetime.utcnow().isoformat()} STATUS: {res.status_code} METHOD: "
+                    f"{req.method} URL:{req.url}\n"
+                )
 
     def save(self):
         pass
 
 
-WRITER: Dict[str, Type[UrlIndexWriter]] = {
+WRITER: dict[str, type[UrlIndexWriter]] = {
     "json": JSONUrlIndexWriter,
     "text": TextUrlIndexWriter,
 }
@@ -122,9 +125,14 @@ class UrlIndexAddon:
     OPT_APPEND = "URLINDEX_APPEND"
     OPT_INDEX_FILTER = "URLINDEX_FILTER"
 
-    def __init__(self, file_path: Union[str, Path], append: bool = True,
-                 index_filter: Union[str, flowfilter.TFilter] = filter_404, index_format: str = "json"):
-        """ Initializes the urlindex add-on.
+    def __init__(
+        self,
+        file_path: Union[str, Path],
+        append: bool = True,
+        index_filter: Union[str, flowfilter.TFilter] = filter_404,
+        index_format: str = "json",
+    ):
+        """Initializes the urlindex add-on.
 
         Args:
             file_path: Path to file to which the URL index will be written. Can either be given as str or Path.
@@ -155,7 +163,7 @@ class UrlIndexAddon:
 
     def response(self, flow: HTTPFlow):
         """Checks if the response should be included in the URL based on the index_filter and adds it to the URL index
-            if appropriate.
+        if appropriate.
         """
         if isinstance(self.index_filter, str) or self.index_filter is None:
             raise ValueError("Invalid filter expression.")

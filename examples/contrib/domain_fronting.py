@@ -1,6 +1,8 @@
-from typing import Set, Union, Dict, Optional
 import json
 from dataclasses import dataclass
+from typing import Optional
+from typing import Union
+
 from mitmproxy import ctx
 from mitmproxy.addonmanager import Loader
 from mitmproxy.http import HTTPFlow
@@ -58,12 +60,11 @@ class Mapping:
 
 
 class HttpsDomainFronting:
-
     # configurations for regular ("foo.example.com") mappings:
-    star_mappings: Dict[str, Mapping]
+    star_mappings: dict[str, Mapping]
 
     # Configurations for star ("*.example.com") mappings:
-    strict_mappings: Dict[str, Mapping]
+    strict_mappings: dict[str, Mapping]
 
     def __init__(self) -> None:
         self.strict_mappings = {}
@@ -79,7 +80,7 @@ class HttpsDomainFronting:
             index = host.find(".", index)
             if index == -1:
                 break
-            super_domain = host[(index + 1):]
+            super_domain = host[(index + 1) :]
             mapping = self.star_mappings.get(super_domain)
             if mapping is not None:
                 return mapping
@@ -96,9 +97,9 @@ class HttpsDomainFronting:
         )
 
     def _load_configuration_file(self, filename: str) -> None:
-        config = json.load(open(filename, "rt"))
-        strict_mappings: Dict[str, Mapping] = {}
-        star_mappings: Dict[str, Mapping] = {}
+        config = json.load(open(filename))
+        strict_mappings: dict[str, Mapping] = {}
+        star_mappings: dict[str, Mapping] = {}
         for mapping in config["mappings"]:
             item = Mapping(server=mapping.get("server"), host=mapping.get("host"))
             for pattern in mapping["patterns"]:
@@ -109,7 +110,7 @@ class HttpsDomainFronting:
         self.strict_mappings = strict_mappings
         self.star_mappings = star_mappings
 
-    def configure(self, updated: Set[str]) -> None:
+    def configure(self, updated: set[str]) -> None:
         if "domainfrontingfile" in updated:
             domain_fronting_file = ctx.options.domainfrontingfile
             self._load_configuration_file(domain_fronting_file)

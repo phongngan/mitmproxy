@@ -6,10 +6,14 @@ possibly to the master and addons.
 
 The counterpart to commands are events.
 """
-from typing import Literal, Union, TYPE_CHECKING
+import logging
+import warnings
+from typing import TYPE_CHECKING
+from typing import Union
 
 import mitmproxy.hooks
-from mitmproxy.connection import Connection, Server
+from mitmproxy.connection import Connection
+from mitmproxy.connection import Server
 
 if TYPE_CHECKING:
     import mitmproxy.proxy.layer
@@ -39,10 +43,22 @@ class Command:
         return f"{type(self).__name__}({repr(x)})"
 
 
+class RequestWakeup(Command):
+    """
+    Request a `Wakeup` event after the specified amount of seconds.
+    """
+
+    delay: float
+
+    def __init__(self, delay: float):
+        self.delay = delay
+
+
 class ConnectionCommand(Command):
     """
     Commands involving a specific connection
     """
+
     connection: Connection
 
     def __init__(self, connection: Connection):
@@ -53,6 +69,7 @@ class SendData(ConnectionCommand):
     """
     Send data to a remote peer
     """
+
     data: bytes
 
     def __init__(self, connection: Connection, data: bytes):
@@ -61,13 +78,14 @@ class SendData(ConnectionCommand):
 
     def __repr__(self):
         target = str(self.connection).split("(", 1)[0].lower()
-        return f"SendData({target}, {self.data})"
+        return f"SendData({target}, {self.data!r})"
 
 
 class OpenConnection(ConnectionCommand):
     """
     Open a new connection
     """
+
     connection: Server
     blocking = True
 
@@ -77,6 +95,9 @@ class CloseConnection(ConnectionCommand):
     Close a connection. If the client connection is closed,
     all other connections will ultimately be closed during cleanup.
     """
+
+
+class CloseTcpConnection(CloseConnection):
     half_close: bool
     """
     If True, only close our half of the connection by sending a FIN packet.
@@ -94,6 +115,7 @@ class StartHook(Command, mitmproxy.hooks.Hook):
     Start an event hook in the mitmproxy core.
     This triggers a particular function (derived from the class name) in all addons.
     """
+
     name = ""
     blocking = True
 
@@ -103,21 +125,34 @@ class StartHook(Command, mitmproxy.hooks.Hook):
         return super().__new__(cls, *args, **kwargs)
 
 
-class GetSocket(ConnectionCommand):
-    """
-    Get the underlying socket.
-    This should really never be used, but is required to implement transparent mode.
-    """
-    blocking = True
-
-
 class Log(Command):
-    message: str
-    level: str
+    """
+    Log a message.
 
-    def __init__(self, message: str, level: Literal["error", "warn", "info", "alert", "debug"] = "info"):
+    Layers could technically call `logging.log` directly, but the use of a command allows us to
+    write more expressive playbook tests. Put differently, by using commands we can assert that
+    a specific log message is a direct consequence of a particular I/O event.
+    This could also be implemented with some more playbook magic in the future,
+    but for now we keep the current approach as the fully sans-io one.
+    """
+
+    message: str
+    level: int
+
+    def __init__(
+        self,
+        message: str,
+        level: int = logging.INFO,
+    ):
+        if isinstance(level, str):  # pragma: no cover
+            warnings.warn(
+                "commands.Log() now expects an integer log level, not a string.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            level = getattr(logging, level.upper())
         self.message = message
         self.level = level
 
     def __repr__(self):
-        return f"Log({self.message!r}, {self.level!r})"
+        return f"Log({self.message!r}, {logging.getLevelName(self.level).lower()})"

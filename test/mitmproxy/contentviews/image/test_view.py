@@ -1,5 +1,5 @@
-from mitmproxy.contentviews import image
 from .. import full_eval
+from mitmproxy.contentviews import image
 
 
 def test_view_image(tdata):
@@ -14,7 +14,10 @@ def test_view_image(tdata):
             viewname, lines = v(f.read())
             assert img.split(".")[-1].upper() in viewname
 
-    assert v(b"flibble") == ('Unknown Image', [[('header', 'Image Format: '), ('text', 'unknown')]])
+    assert v(b"flibble") == (
+        "Unknown Image",
+        [[("header", "Image Format: "), ("text", "unknown")]],
+    )
 
 
 def test_render_priority():

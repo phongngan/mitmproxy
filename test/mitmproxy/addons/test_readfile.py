@@ -1,8 +1,8 @@
 import asyncio
 import io
+from unittest import mock
 
 import pytest
-from unittest import mock
 
 import mitmproxy.io
 from mitmproxy import exceptions
@@ -20,7 +20,7 @@ def data():
         tflow.tflow(resp=True),
         tflow.tflow(err=True),
         tflow.ttcpflow(),
-        tflow.ttcpflow(err=True)
+        tflow.ttcpflow(err=True),
     ]
     for flow in flows:
         w.add(flow)
@@ -47,20 +47,16 @@ class TestReadFile:
                 tctx.configure(rf, readfile_filter="~~")
             tctx.configure(rf, readfile_filter="")
 
-    async def test_read(self, tmpdir, data, corrupt_data):
+    async def test_read(self, tmpdir, data, corrupt_data, caplog_async):
         rf = readfile.ReadFile()
         with taddons.context(rf) as tctx:
             assert not rf.reading()
 
             tf = tmpdir.join("tfile")
 
-            with mock.patch('mitmproxy.master.Master.load_flow') as mck:
+            with mock.patch("mitmproxy.master.Master.load_flow") as mck:
                 tf.write(data.getvalue())
-                tctx.configure(
-                    rf,
-                    rfile = str(tf),
-                    readfile_filter = ".*"
-                )
+                tctx.configure(rf, rfile=str(tf), readfile_filter=".*")
                 mck.assert_not_awaited()
                 rf.running()
                 await asyncio.sleep(0)
@@ -69,33 +65,32 @@ class TestReadFile:
             tf.write(corrupt_data.getvalue())
             tctx.configure(rf, rfile=str(tf))
             rf.running()
-            await tctx.master.await_log("corrupted")
+            await caplog_async.await_log("corrupted")
 
-    async def test_corrupt(self, corrupt_data):
+    async def test_corrupt(self, corrupt_data, caplog_async):
         rf = readfile.ReadFile()
-        with taddons.context(rf) as tctx:
+        with taddons.context(rf):
             with pytest.raises(exceptions.FlowReadException):
                 await rf.load_flows(io.BytesIO(b"qibble"))
 
-            tctx.master.clear()
+            caplog_async.clear()
             with pytest.raises(exceptions.FlowReadException):
                 await rf.load_flows(corrupt_data)
-            await tctx.master.await_log("file corrupted")
+            await caplog_async.await_log("file corrupted")
 
-    async def test_nonexistent_file(self):
+    async def test_nonexistent_file(self, caplog):
         rf = readfile.ReadFile()
-        with taddons.context(rf) as tctx:
-            with pytest.raises(exceptions.FlowReadException):
-                await rf.load_flows_from_path("nonexistent")
-            await tctx.master.await_log("nonexistent")
+        with pytest.raises(exceptions.FlowReadException):
+            await rf.load_flows_from_path("nonexistent")
+        assert "nonexistent" in caplog.text
 
 
 class TestReadFileStdin:
-    @mock.patch('sys.stdin')
+    @mock.patch("sys.stdin")
     async def test_stdin(self, stdin, data, corrupt_data):
         rf = readfile.ReadFileStdin()
         with taddons.context(rf):
-            with mock.patch('mitmproxy.master.Master.load_flow') as mck:
+            with mock.patch("mitmproxy.master.Master.load_flow") as mck:
                 stdin.buffer = data
                 mck.assert_not_awaited()
                 await rf.load_flows(stdin.buffer)
@@ -109,7 +104,7 @@ class TestReadFileStdin:
         rf = readfile.ReadFileStdin()
         with taddons.context(rf) as tctx:
             tf = tmpdir.join("tfile")
-            with mock.patch('mitmproxy.master.Master.load_flow') as mck:
+            with mock.patch("mitmproxy.master.Master.load_flow") as mck:
                 tf.write(data.getvalue())
                 tctx.configure(rf, rfile=str(tf))
                 mck.assert_not_awaited()

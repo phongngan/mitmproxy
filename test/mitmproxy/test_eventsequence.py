@@ -5,12 +5,15 @@ from mitmproxy.proxy import layers
 from mitmproxy.test import tflow
 
 
-@pytest.mark.parametrize("resp, err", [
-    (False, False),
-    (True, False),
-    (False, True),
-    (True, True),
-])
+@pytest.mark.parametrize(
+    "resp, err",
+    [
+        (False, False),
+        (True, False),
+        (False, True),
+        (True, True),
+    ],
+)
 def test_http_flow(resp, err):
     f = tflow.tflow(resp=resp, err=err)
     i = eventsequence.iterate(f)
@@ -57,6 +60,41 @@ def test_tcp_flow(err):
         assert isinstance(next(i), layers.tcp.TcpErrorHook)
     else:
         assert isinstance(next(i), layers.tcp.TcpEndHook)
+
+
+@pytest.mark.parametrize("err", [False, True])
+def test_udp_flow(err):
+    f = tflow.tudpflow(err=err)
+    i = eventsequence.iterate(f)
+    assert isinstance(next(i), layers.udp.UdpStartHook)
+    assert len(f.messages) == 0
+    assert isinstance(next(i), layers.udp.UdpMessageHook)
+    assert len(f.messages) == 1
+    assert isinstance(next(i), layers.udp.UdpMessageHook)
+    assert len(f.messages) == 2
+    if err:
+        assert isinstance(next(i), layers.udp.UdpErrorHook)
+    else:
+        assert isinstance(next(i), layers.udp.UdpEndHook)
+
+
+@pytest.mark.parametrize(
+    "resp, err",
+    [
+        (False, False),
+        (True, False),
+        (False, True),
+        (True, True),
+    ],
+)
+def test_dns(resp, err):
+    f = tflow.tdnsflow(resp=resp, err=err)
+    i = eventsequence.iterate(f)
+    assert isinstance(next(i), layers.dns.DnsRequestHook)
+    if resp:
+        assert isinstance(next(i), layers.dns.DnsResponseHook)
+    if err:
+        assert isinstance(next(i), layers.dns.DnsErrorHook)
 
 
 def test_invalid():

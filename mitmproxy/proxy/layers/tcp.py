@@ -1,10 +1,14 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from mitmproxy import flow, tcp
-from mitmproxy.proxy import commands, events, layer
+from mitmproxy import flow
+from mitmproxy import tcp
+from mitmproxy.connection import Connection
+from mitmproxy.connection import ConnectionState
+from mitmproxy.proxy import commands
+from mitmproxy.proxy import events
+from mitmproxy.proxy import layer
 from mitmproxy.proxy.commands import StartHook
-from mitmproxy.connection import ConnectionState, Connection
 from mitmproxy.proxy.context import Context
 from mitmproxy.proxy.events import MessageInjected
 from mitmproxy.proxy.utils import expect
@@ -25,6 +29,7 @@ class TcpMessageHook(StartHook):
     A TCP connection has received a message. The most recent message
     will be flow.messages[-1]. The message is user-modifiable.
     """
+
     flow: tcp.TCPFlow
 
 
@@ -33,6 +38,7 @@ class TcpEndHook(StartHook):
     """
     A TCP connection has ended.
     """
+
     flow: tcp.TCPFlow
 
 
@@ -43,6 +49,7 @@ class TcpErrorHook(StartHook):
 
     Every TCP flow will receive either a tcp_error or a tcp_end event, but not both.
     """
+
     flow: tcp.TCPFlow
 
 
@@ -56,6 +63,7 @@ class TCPLayer(layer.Layer):
     """
     Simple TCP layer that just relays messages right now.
     """
+
     flow: Optional[tcp.TCPFlow]
 
     def __init__(self, context: Context, ignore: bool = False):
@@ -85,11 +93,12 @@ class TCPLayer(layer.Layer):
 
     @expect(events.DataReceived, events.ConnectionClosed, TcpMessageInjected)
     def relay_messages(self, event: events.Event) -> layer.CommandGenerator[None]:
-
         if isinstance(event, TcpMessageInjected):
             # we just spoof that we received data here and then process that regularly.
             event = events.DataReceived(
-                self.context.client if event.message.from_client else self.context.server,
+                self.context.client
+                if event.message.from_client
+                else self.context.server,
                 event.message.content,
             )
 
@@ -113,21 +122,20 @@ class TCPLayer(layer.Layer):
 
         elif isinstance(event, events.ConnectionClosed):
             all_done = not (
-                    (self.context.client.state & ConnectionState.CAN_READ)
-                    or
-                    (self.context.server.state & ConnectionState.CAN_READ)
+                (self.context.client.state & ConnectionState.CAN_READ)
+                or (self.context.server.state & ConnectionState.CAN_READ)
             )
             if all_done:
+                self._handle_event = self.done
                 if self.context.server.state is not ConnectionState.CLOSED:
                     yield commands.CloseConnection(self.context.server)
                 if self.context.client.state is not ConnectionState.CLOSED:
                     yield commands.CloseConnection(self.context.client)
-                self._handle_event = self.done
                 if self.flow:
                     yield TcpEndHook(self.flow)
                     self.flow.live = False
             else:
-                yield commands.CloseConnection(send_to, half_close=True)
+                yield commands.CloseTcpConnection(send_to, half_close=True)
         else:
             raise AssertionError(f"Unexpected event: {event}")
 

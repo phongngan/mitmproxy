@@ -1,10 +1,16 @@
 import asyncio
+import logging
 import traceback
 import urllib.parse
+from typing import Optional
 
 import asgiref.compatibility
 import asgiref.wsgi
-from mitmproxy import ctx, http
+
+from mitmproxy import ctx
+from mitmproxy import http
+
+logger = logging.getLogger(__name__)
 
 
 class ASGIApp:
@@ -16,7 +22,7 @@ class ASGIApp:
         - It currently only implements the HTTP protocol (Lifespan and WebSocket are unimplemented).
     """
 
-    def __init__(self, asgi_app, host: str, port: int):
+    def __init__(self, asgi_app, host: str, port: Optional[int]):
         asgi_app = asgiref.compatibility.guarantee_single_callable(asgi_app)
         self.asgi_app, self.host, self.port = asgi_app, host, port
 
@@ -26,8 +32,11 @@ class ASGIApp:
 
     def should_serve(self, flow: http.HTTPFlow) -> bool:
         return bool(
-            (flow.request.pretty_host, flow.request.port) == (self.host, self.port)
-            and flow.live and not flow.error and not flow.response
+            flow.request.pretty_host == self.host
+            and (self.port is None or flow.request.port == self.port)
+            and flow.live
+            and not flow.error
+            and not flow.response
         )
 
     async def request(self, flow: http.HTTPFlow) -> None:
@@ -36,7 +45,7 @@ class ASGIApp:
 
 
 class WSGIApp(ASGIApp):
-    def __init__(self, wsgi_app, host: str, port: int):
+    def __init__(self, wsgi_app, host: str, port: Optional[int]):
         asgi_app = asgiref.wsgi.WsgiToAsgi(wsgi_app)
         super().__init__(asgi_app, host, port)
 
@@ -50,7 +59,9 @@ HTTP_VERSION_MAP = {
 
 def make_scope(flow: http.HTTPFlow) -> dict:
     # %3F is a quoted question mark
-    quoted_path = urllib.parse.quote_from_bytes(flow.request.data.path).split("%3F", maxsplit=1)
+    quoted_path = urllib.parse.quote_from_bytes(flow.request.data.path).split(
+        "%3F", maxsplit=1
+    )
 
     # (Unicode string) – HTTP request target excluding any query string, with percent-encoded
     # sequences and UTF-8 byte sequences decoded into characters.
@@ -75,11 +86,13 @@ def make_scope(flow: http.HTTPFlow) -> dict:
         "path": path,
         "raw_path": flow.request.path,
         "query_string": query_string,
-        "headers": [(name.lower(), value) for (name, value) in flow.request.headers.fields],
+        "headers": [
+            (name.lower(), value) for (name, value) in flow.request.headers.fields
+        ],
         "client": flow.client_conn.peername,
         "extensions": {
             "mitmproxy.master": ctx.master,
-        }
+        },
     }
 
 
@@ -105,15 +118,16 @@ async def serve(app, flow: http.HTTPFlow):
             # We really don't expect this to be called a second time, but what to do?
             # We just wait until the request is done before we continue here with sending a disconnect.
             await done.wait()
-            return {
-                "type": "http.disconnect"
-            }
+            return {"type": "http.disconnect"}
 
     async def send(event):
         if event["type"] == "http.response.start":
-            flow.response = http.Response.make(event["status"], b"", event.get("headers", []))
+            flow.response = http.Response.make(
+                event["status"], b"", event.get("headers", [])
+            )
             flow.response.decode()
         elif event["type"] == "http.response.body":
+            assert flow.response
             flow.response.content += event.get("body", b"")
             if not event.get("more_body", False):
                 nonlocal sent_response
@@ -126,7 +140,7 @@ async def serve(app, flow: http.HTTPFlow):
         if not sent_response:
             raise RuntimeError(f"no response sent.")
     except Exception:
-        ctx.log.error(f"Error in asgi app:\n{traceback.format_exc(limit=-5)}")
+        logger.error(f"Error in asgi app:\n{traceback.format_exc(limit=-5)}")
         flow.response = http.Response.make(500, b"ASGI Error.")
     finally:
         done.set()

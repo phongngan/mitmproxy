@@ -1,14 +1,14 @@
 import pytest
 
-from mitmproxy.test import tflow
-
-from mitmproxy.addons import view
-from mitmproxy import flowfilter
 from mitmproxy import exceptions
+from mitmproxy import flowfilter
 from mitmproxy import io
+from mitmproxy.addons import view
 from mitmproxy.test import taddons
+from mitmproxy.test import tflow
 from mitmproxy.tools.console import consoleaddons
-from mitmproxy.tools.console.common import render_marker, SYMBOL_MARK
+from mitmproxy.tools.console.common import render_marker
+from mitmproxy.tools.console.common import SYMBOL_MARK
 
 
 def tft(*, method="get", start=0):
@@ -54,21 +54,47 @@ def test_order_generators_http():
     assert sz.generate(tf) == len(tf.request.raw_content) + len(tf.response.raw_content)
 
 
-def test_order_generators_tcp():
+def test_order_generators_dns():
     v = view.View()
-    tf = tflow.ttcpflow()
+    tf = tflow.tdnsflow(resp=True)
 
     rs = view.OrderRequestStart(v)
     assert rs.generate(tf) == 946681200
 
     rm = view.OrderRequestMethod(v)
-    assert rm.generate(tf) == "TCP"
+    assert rm.generate(tf) == "QUERY"
+
+    ru = view.OrderRequestURL(v)
+    assert ru.generate(tf) == "dns.google"
+
+    sz = view.OrderKeySize(v)
+    assert sz.generate(tf) == tf.response.size
+
+    tf = tflow.tdnsflow(resp=False)
+    assert sz.generate(tf) == 0
+
+
+def order_generators_proto(tf, name):
+    v = view.View()
+    rs = view.OrderRequestStart(v)
+    assert rs.generate(tf) == 946681200
+
+    rm = view.OrderRequestMethod(v)
+    assert rm.generate(tf) == name
 
     ru = view.OrderRequestURL(v)
     assert ru.generate(tf) == "address:22"
 
     sz = view.OrderKeySize(v)
     assert sz.generate(tf) == sum(len(m.content) for m in tf.messages)
+
+
+def test_order_generators_tcp():
+    order_generators_proto(tflow.ttcpflow(), "TCP")
+
+
+def test_order_generators_udp():
+    order_generators_proto(tflow.tudpflow(), "UDP")
 
 
 def test_simple():
@@ -138,13 +164,42 @@ def test_simple_tcp():
     assert list(v) == [f]
 
 
+def test_simple_udp():
+    v = view.View()
+    f = tflow.tudpflow()
+    assert v.store_count() == 0
+    v.udp_start(f)
+    assert list(v) == [f]
+
+    # These all just call update
+    v.udp_start(f)
+    v.udp_message(f)
+    v.udp_error(f)
+    v.udp_end(f)
+    assert list(v) == [f]
+
+
+def test_simple_dns():
+    v = view.View()
+    f = tflow.tdnsflow(resp=True, err=True)
+    assert v.store_count() == 0
+    v.dns_request(f)
+    assert list(v) == [f]
+
+    # These all just call update
+    v.dns_request(f)
+    v.dns_response(f)
+    v.dns_error(f)
+    assert list(v) == [f]
+
+
 def test_filter():
     v = view.View()
     v.requestheaders(tft(method="get"))
     v.requestheaders(tft(method="put"))
     v.requestheaders(tft(method="get"))
     v.requestheaders(tft(method="put"))
-    assert(len(v)) == 4
+    assert (len(v)) == 4
     v.set_filter_cmd("~m get")
     assert [i.request.method for i in v] == ["GET", "GET"]
     assert len(v._store) == 4
@@ -194,30 +249,22 @@ def test_orders():
         assert v.order_options()
 
 
-async def test_load(tmpdir):
+async def test_load(tmpdir, caplog):
     path = str(tmpdir.join("path"))
     v = view.View()
-    with taddons.context() as tctx:
-        tctx.master.addons.add(v)
-        tdump(
-            path,
-            [
-                tflow.tflow(resp=True),
-                tflow.tflow(resp=True)
-            ]
-        )
-        v.load_file(path)
-        assert len(v) == 2
-        v.load_file(path)
-        assert len(v) == 4
-        try:
-            v.load_file("nonexistent_file_path")
-        except OSError:
-            assert False
-        with open(path, "wb") as f:
-            f.write(b"invalidflows")
-        v.load_file(path)
-        await tctx.master.await_log("Invalid data format.")
+    tdump(path, [tflow.tflow(resp=True), tflow.tflow(resp=True)])
+    v.load_file(path)
+    assert len(v) == 2
+    v.load_file(path)
+    assert len(v) == 4
+    try:
+        v.load_file("nonexistent_file_path")
+    except OSError:
+        assert False
+    with open(path, "wb") as f:
+        f.write(b"invalidflows")
+    v.load_file(path)
+    assert "Invalid data format." in caplog.text
 
 
 def test_resolve():
@@ -275,13 +322,15 @@ def test_movement():
     v = view.View()
     with taddons.context():
         v.go(0)
-        v.add([
-            tflow.tflow(),
-            tflow.tflow(),
-            tflow.tflow(),
-            tflow.tflow(),
-            tflow.tflow(),
-        ])
+        v.add(
+            [
+                tflow.tflow(),
+                tflow.tflow(),
+                tflow.tflow(),
+                tflow.tflow(),
+                tflow.tflow(),
+            ]
+        )
         assert v.focus.index == 0
         v.go(-1)
         assert v.focus.index == 4
@@ -298,6 +347,12 @@ def test_movement():
         assert v.focus.index == 1
         v.focus_prev()
         assert v.focus.index == 0
+
+        v.clear()
+        v.focus_next()
+        assert v.focus.index is None
+        v.focus_prev()
+        assert v.focus.index is None
 
 
 def test_duplicate():
@@ -551,12 +606,14 @@ def test_focus():
     assert f.index is None
     assert f.flow is None
 
-    v.add([
-        tft(method="get", start=0),
-        tft(method="get", start=1),
-        tft(method="put", start=2),
-        tft(method="get", start=3),
-    ])
+    v.add(
+        [
+            tft(method="get", start=0),
+            tft(method="get", start=1),
+            tft(method="put", start=2),
+            tft(method="get", start=3),
+        ]
+    )
 
     f.flow = v[2]
     assert f.flow.request.method == "PUT"
@@ -620,11 +677,15 @@ def test_configure():
         assert v.focus_follow
 
 
-@pytest.mark.parametrize("marker, expected", [
-    [":default:", SYMBOL_MARK],
-    ["X", "X"],
-    [":grapes:", "\N{grapes}"],
-    [":not valid:", SYMBOL_MARK], [":weird", SYMBOL_MARK]
-])
+@pytest.mark.parametrize(
+    "marker, expected",
+    [
+        [":default:", SYMBOL_MARK],
+        ["X", "X"],
+        [":grapes:", "\N{grapes}"],
+        [":not valid:", SYMBOL_MARK],
+        [":weird", SYMBOL_MARK],
+    ],
+)
 def test_marker(marker, expected):
     assert render_marker(marker) == expected

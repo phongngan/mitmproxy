@@ -1,9 +1,8 @@
-import collections
+from __future__ import annotations
+
 import collections.abc
 import contextlib
-import ctypes
 import ctypes.wintypes
-import io
 import json
 import os
 import re
@@ -11,10 +10,17 @@ import socket
 import socketserver
 import threading
 import time
-import typing
+from collections.abc import Callable
+from typing import Any
+from typing import cast
+from typing import ClassVar
+from typing import IO
+from typing import Optional
 
-import pydivert
 import pydivert.consts
+
+from mitmproxy.net.local_ip import get_local_ip
+from mitmproxy.net.local_ip import get_local_ip6
 
 REDIRECT_API_HOST = "127.0.0.1"
 REDIRECT_API_PORT = 8085
@@ -23,20 +29,21 @@ REDIRECT_API_PORT = 8085
 ##########################
 # Resolver
 
-def read(rfile: io.BufferedReader) -> typing.Any:
+
+def read(rfile: IO[bytes]) -> Any:
     x = rfile.readline().strip()
     if not x:
         return None
     return json.loads(x)
 
 
-def write(data, wfile: io.BufferedWriter) -> None:
+def write(data, wfile: IO[bytes]) -> None:
     wfile.write(json.dumps(data).encode() + b"\n")
     wfile.flush()
 
 
 class Resolver:
-    sock: socket.socket
+    sock: socket.socket | None
     lock: threading.RLock
 
     def __init__(self):
@@ -54,8 +61,8 @@ class Resolver:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.connect((REDIRECT_API_HOST, REDIRECT_API_PORT))
 
-        self.wfile = self.sock.makefile('wb')
-        self.rfile = self.sock.makefile('rb')
+        self.wfile = self.sock.makefile("wb")
+        self.rfile = self.sock.makefile("rb")
         write(os.getpid(), self.wfile)
 
     def original_addr(self, csock: socket.socket):
@@ -80,7 +87,9 @@ class APIRequestHandler(socketserver.StreamRequestHandler):
     for each received pickled client address, port tuple.
     """
 
-    def handle(self):
+    server: APIServer
+
+    def handle(self) -> None:
         proxifier: TransparentProxy = self.server.proxifier
         try:
             pid: int = read(self.rfile)
@@ -92,7 +101,9 @@ class APIRequestHandler(socketserver.StreamRequestHandler):
                     if c is None:
                         return
                     try:
-                        server = proxifier.client_server_map[tuple(c)]
+                        server = proxifier.client_server_map[
+                            cast(tuple[str, int], tuple(c))
+                        ]
                     except KeyError:
                         server = None
                     write(server, self.wfile)
@@ -101,7 +112,6 @@ class APIRequestHandler(socketserver.StreamRequestHandler):
 
 
 class APIServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
-
     def __init__(self, proxifier, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.proxifier = proxifier
@@ -122,17 +132,18 @@ IN4_ADDR = ctypes.c_ubyte * 4
 # IPv6
 #
 
+
 # https://msdn.microsoft.com/en-us/library/windows/desktop/aa366896(v=vs.85).aspx
 class MIB_TCP6ROW_OWNER_PID(ctypes.Structure):
     _fields_ = [
-        ('ucLocalAddr', IN6_ADDR),
-        ('dwLocalScopeId', ctypes.wintypes.DWORD),
-        ('dwLocalPort', ctypes.wintypes.DWORD),
-        ('ucRemoteAddr', IN6_ADDR),
-        ('dwRemoteScopeId', ctypes.wintypes.DWORD),
-        ('dwRemotePort', ctypes.wintypes.DWORD),
-        ('dwState', ctypes.wintypes.DWORD),
-        ('dwOwningPid', ctypes.wintypes.DWORD),
+        ("ucLocalAddr", IN6_ADDR),
+        ("dwLocalScopeId", ctypes.wintypes.DWORD),
+        ("dwLocalPort", ctypes.wintypes.DWORD),
+        ("ucRemoteAddr", IN6_ADDR),
+        ("dwRemoteScopeId", ctypes.wintypes.DWORD),
+        ("dwRemotePort", ctypes.wintypes.DWORD),
+        ("dwState", ctypes.wintypes.DWORD),
+        ("dwOwningPid", ctypes.wintypes.DWORD),
     ]
 
 
@@ -140,8 +151,8 @@ class MIB_TCP6ROW_OWNER_PID(ctypes.Structure):
 def MIB_TCP6TABLE_OWNER_PID(size):
     class _MIB_TCP6TABLE_OWNER_PID(ctypes.Structure):
         _fields_ = [
-            ('dwNumEntries', ctypes.wintypes.DWORD),
-            ('table', MIB_TCP6ROW_OWNER_PID * size)
+            ("dwNumEntries", ctypes.wintypes.DWORD),
+            ("table", MIB_TCP6ROW_OWNER_PID * size),
         ]
 
     return _MIB_TCP6TABLE_OWNER_PID()
@@ -151,15 +162,16 @@ def MIB_TCP6TABLE_OWNER_PID(size):
 # IPv4
 #
 
+
 # https://msdn.microsoft.com/en-us/library/windows/desktop/aa366913(v=vs.85).aspx
 class MIB_TCPROW_OWNER_PID(ctypes.Structure):
     _fields_ = [
-        ('dwState', ctypes.wintypes.DWORD),
-        ('ucLocalAddr', IN4_ADDR),
-        ('dwLocalPort', ctypes.wintypes.DWORD),
-        ('ucRemoteAddr', IN4_ADDR),
-        ('dwRemotePort', ctypes.wintypes.DWORD),
-        ('dwOwningPid', ctypes.wintypes.DWORD),
+        ("dwState", ctypes.wintypes.DWORD),
+        ("ucLocalAddr", IN4_ADDR),
+        ("dwLocalPort", ctypes.wintypes.DWORD),
+        ("ucRemoteAddr", IN4_ADDR),
+        ("dwRemotePort", ctypes.wintypes.DWORD),
+        ("dwOwningPid", ctypes.wintypes.DWORD),
     ]
 
 
@@ -167,8 +179,8 @@ class MIB_TCPROW_OWNER_PID(ctypes.Structure):
 def MIB_TCPTABLE_OWNER_PID(size):
     class _MIB_TCPTABLE_OWNER_PID(ctypes.Structure):
         _fields_ = [
-            ('dwNumEntries', ctypes.wintypes.DWORD),
-            ('table', MIB_TCPROW_OWNER_PID * size)
+            ("dwNumEntries", ctypes.wintypes.DWORD),
+            ("table", MIB_TCPROW_OWNER_PID * size),
         ]
 
     return _MIB_TCPTABLE_OWNER_PID()
@@ -202,16 +214,16 @@ class TcpConnectionTable(collections.abc.Mapping):
         self._refresh_ipv6()
 
     def _refresh_ipv4(self):
-        ret = ctypes.windll.iphlpapi.GetExtendedTcpTable(
+        ret = ctypes.windll.iphlpapi.GetExtendedTcpTable(  # type: ignore
             ctypes.byref(self._tcp),
             ctypes.byref(self._tcp_size),
             False,
             socket.AF_INET,
             TCP_TABLE_OWNER_PID_CONNECTIONS,
-            0
+            0,
         )
         if ret == 0:
-            for row in self._tcp.table[:self._tcp.dwNumEntries]:
+            for row in self._tcp.table[: self._tcp.dwNumEntries]:
                 local_ip = socket.inet_ntop(socket.AF_INET, bytes(row.ucLocalAddr))
                 local_port = socket.htons(row.dwLocalPort)
                 self._map[(local_ip, local_port)] = row.dwOwningPid
@@ -220,19 +232,21 @@ class TcpConnectionTable(collections.abc.Mapping):
             # no need to update size, that's already done.
             self._refresh_ipv4()
         else:
-            raise RuntimeError("[IPv4] Unknown GetExtendedTcpTable return code: %s" % ret)
+            raise RuntimeError(
+                "[IPv4] Unknown GetExtendedTcpTable return code: %s" % ret
+            )
 
     def _refresh_ipv6(self):
-        ret = ctypes.windll.iphlpapi.GetExtendedTcpTable(
+        ret = ctypes.windll.iphlpapi.GetExtendedTcpTable(  # type: ignore
             ctypes.byref(self._tcp6),
             ctypes.byref(self._tcp6_size),
             False,
             socket.AF_INET6,
             TCP_TABLE_OWNER_PID_CONNECTIONS,
-            0
+            0,
         )
         if ret == 0:
-            for row in self._tcp6.table[:self._tcp6.dwNumEntries]:
+            for row in self._tcp6.table[: self._tcp6.dwNumEntries]:
                 local_ip = socket.inet_ntop(socket.AF_INET6, bytes(row.ucLocalAddr))
                 local_port = socket.htons(row.dwLocalPort)
                 self._map[(local_ip, local_port)] = row.dwOwningPid
@@ -241,33 +255,9 @@ class TcpConnectionTable(collections.abc.Mapping):
             # no need to update size, that's already done.
             self._refresh_ipv6()
         else:
-            raise RuntimeError("[IPv6] Unknown GetExtendedTcpTable return code: %s" % ret)
-
-
-def get_local_ip() -> typing.Optional[str]:
-    # Auto-Detect local IP. This is required as re-injecting to 127.0.0.1 does not work.
-    # https://stackoverflow.com/questions/166506/finding-local-ip-addresses-using-pythons-stdlib
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("8.8.8.8", 80))
-        return s.getsockname()[0]
-    except OSError:
-        return None
-    finally:
-        s.close()
-
-
-def get_local_ip6(reachable: str) -> typing.Optional[str]:
-    # The same goes for IPv6, with the added difficulty that .connect() fails if
-    # the target network is not reachable.
-    s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-    try:
-        s.connect((reachable, 80))
-        return s.getsockname()[0]
-    except OSError:
-        return None
-    finally:
-        s.close()
+            raise RuntimeError(
+                "[IPv6] Unknown GetExtendedTcpTable return code: %s" % ret
+            )
 
 
 class Redirect(threading.Thread):
@@ -276,10 +266,10 @@ class Redirect(threading.Thread):
 
     def __init__(
         self,
-        handle: typing.Callable[[pydivert.Packet], None],
+        handle: Callable[[pydivert.Packet], None],
         filter: str,
         layer: pydivert.Layer = pydivert.Layer.NETWORK,
-        flags: pydivert.Flag = 0
+        flags: pydivert.Flag = 0,
     ) -> None:
         self.handle = handle
         self.windivert = pydivert.WinDivert(filter, layer, flags=flags)
@@ -294,7 +284,7 @@ class Redirect(threading.Thread):
             try:
                 packet = self.windivert.recv()
             except OSError as e:
-                if e.winerror == 995:
+                if getattr(e, "winerror", None) == 995:
                     return
                 else:
                     raise
@@ -304,7 +294,7 @@ class Redirect(threading.Thread):
     def shutdown(self):
         self.windivert.close()
 
-    def recv(self) -> typing.Optional[pydivert.Packet]:
+    def recv(self) -> Optional[pydivert.Packet]:
         """
         Convenience function that receives a packet from the passed handler and handles error codes.
         If the process has been shut down, None is returned.
@@ -319,12 +309,10 @@ class Redirect(threading.Thread):
 
 
 class RedirectLocal(Redirect):
-    trusted_pids: typing.Set[int]
+    trusted_pids: set[int]
 
     def __init__(
-        self,
-        redirect_request: typing.Callable[[pydivert.Packet], None],
-        filter: str
+        self, redirect_request: Callable[[pydivert.Packet], None], filter: str
     ) -> None:
         self.tcp_connections = TcpConnectionTable()
         self.trusted_pids = set()
@@ -349,12 +337,13 @@ class RedirectLocal(Redirect):
             self.windivert.send(packet, recalculate_checksum=True)
 
 
-TConnection = typing.Tuple[str, int]
+TConnection = tuple[str, int]
 
 
 class ClientServerMap:
     """A thread-safe LRU dict."""
-    connection_cache_size: typing.ClassVar[int] = 65536
+
+    connection_cache_size: ClassVar[int] = 65536
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -412,9 +401,10 @@ class TransparentProxy:
     192.168.0.42:4242 simultaneously. This could be mitigated by introducing unique "meta-addresses"
     which mitmproxy sees, but this would remove the correct client info from mitmproxy.
     """
-    local: typing.Optional[RedirectLocal] = None
+
+    local: Optional[RedirectLocal] = None
     # really weird linting error here.
-    forward: typing.Optional[Redirect] = None  # noqa
+    forward: Optional[Redirect] = None
     response: Redirect
     icmp: Redirect
 
@@ -428,35 +418,31 @@ class TransparentProxy:
         local: bool = True,
         forward: bool = True,
         proxy_port: int = 8080,
-        filter: typing.Optional[str] = "tcp.DstPort == 80 or tcp.DstPort == 443",
+        filter: Optional[str] = "tcp.DstPort == 80 or tcp.DstPort == 443",
     ) -> None:
         self.proxy_port = proxy_port
         self.filter = (
             filter
-            or
-            f"tcp.DstPort != {proxy_port} and tcp.DstPort != {REDIRECT_API_PORT} and tcp.DstPort < 49152"
+            or f"tcp.DstPort != {proxy_port} and tcp.DstPort != {REDIRECT_API_PORT} and tcp.DstPort < 49152"
         )
 
         self.ipv4_address = get_local_ip()
-        self.ipv6_address = get_local_ip6("2001:4860:4860::8888")
+        self.ipv6_address = get_local_ip6()
         # print(f"IPv4: {self.ipv4_address}, IPv6: {self.ipv6_address}")
         self.client_server_map = ClientServerMap()
 
-        self.api = APIServer(self, (REDIRECT_API_HOST, REDIRECT_API_PORT), APIRequestHandler)
+        self.api = APIServer(
+            self, (REDIRECT_API_HOST, REDIRECT_API_PORT), APIRequestHandler
+        )
         self.api_thread = threading.Thread(target=self.api.serve_forever)
         self.api_thread.daemon = True
 
         if forward:
             self.forward = Redirect(
-                self.redirect_request,
-                self.filter,
-                pydivert.Layer.NETWORK_FORWARD
+                self.redirect_request, self.filter, pydivert.Layer.NETWORK_FORWARD
             )
         if local:
-            self.local = RedirectLocal(
-                self.redirect_request,
-                self.filter
-            )
+            self.local = RedirectLocal(self.redirect_request, self.filter)
 
         # The proxy server responds to the client. To the client,
         # this response should look like it has been sent by the real target
@@ -469,11 +455,7 @@ class TransparentProxy:
         # If we don't do this, our proxy machine may send an ICMP redirect to the client,
         # which instructs the client to directly connect to the real gateway
         # if they are on the same network.
-        self.icmp = Redirect(
-            lambda _: None,
-            "icmp",
-            flags=pydivert.Flag.DROP
-        )
+        self.icmp = Redirect(lambda _: None, "icmp", flags=pydivert.Flag.DROP)
 
     @classmethod
     def setup(cls):
@@ -563,14 +545,28 @@ if __name__ == "__main__":
         pass
 
     @cli.command()
-    @click.option("--local/--no-local", default=True,
-                  help="Redirect the host's own traffic.")
-    @click.option("--forward/--no-forward", default=True,
-                  help="Redirect traffic that's forwarded by the host.")
-    @click.option("--filter", type=str, metavar="WINDIVERT_FILTER",
-                  help="Custom WinDivert interception rule.")
-    @click.option("-p", "--proxy-port", type=int, metavar="8080", default=8080,
-                  help="The port mitmproxy is listening on.")
+    @click.option(
+        "--local/--no-local", default=True, help="Redirect the host's own traffic."
+    )
+    @click.option(
+        "--forward/--no-forward",
+        default=True,
+        help="Redirect traffic that's forwarded by the host.",
+    )
+    @click.option(
+        "--filter",
+        type=str,
+        metavar="WINDIVERT_FILTER",
+        help="Custom WinDivert interception rule.",
+    )
+    @click.option(
+        "-p",
+        "--proxy-port",
+        type=int,
+        metavar="8080",
+        default=8080,
+        help="The port mitmproxy is listening on.",
+    )
     def redirect(**options):
         """Redirect flows to mitmproxy."""
         proxy = TransparentProxy(**options)

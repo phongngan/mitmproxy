@@ -1,7 +1,12 @@
 import re
 import warnings
-from dataclasses import dataclass, is_dataclass, fields
-from typing import ClassVar, Any, Dict, Type, Set, List, TYPE_CHECKING, Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
+from dataclasses import fields
+from dataclasses import is_dataclass
+from typing import Any
+from typing import ClassVar
+from typing import TYPE_CHECKING
 
 import mitmproxy.flow
 
@@ -13,7 +18,7 @@ if TYPE_CHECKING:
 class Hook:
     name: ClassVar[str]
 
-    def args(self) -> List[Any]:
+    def args(self) -> list[Any]:
         args = []
         for field in fields(self):
             args.append(getattr(self, field.name))
@@ -30,20 +35,23 @@ class Hook:
         # initialize .name attribute. HttpRequestHook -> http_request
         if cls.__dict__.get("name", None) is None:
             name = cls.__name__.replace("Hook", "")
-            cls.name = re.sub('(?!^)([A-Z]+)', r'_\1', name).lower()
+            cls.name = re.sub("(?!^)([A-Z]+)", r"_\1", name).lower()
         if cls.name in all_hooks:
             other = all_hooks[cls.name]
-            warnings.warn(f"Two conflicting event classes for {cls.name}: {cls} and {other}", RuntimeWarning)
+            warnings.warn(
+                f"Two conflicting event classes for {cls.name}: {cls} and {other}",
+                RuntimeWarning,
+            )
         if cls.name == "":
             return  # don't register Hook class.
         all_hooks[cls.name] = cls
 
         # define a custom hash and __eq__ function so that events are hashable and not comparable.
-        cls.__hash__ = object.__hash__
-        cls.__eq__ = object.__eq__
+        cls.__hash__ = object.__hash__  # type: ignore
+        cls.__eq__ = object.__eq__  # type: ignore
 
 
-all_hooks: Dict[str, Type[Hook]] = {}
+all_hooks: dict[str, type[Hook]] = {}
 
 
 @dataclass
@@ -53,7 +61,8 @@ class ConfigureHook(Hook):
     set-like object containing the keys of all changed options. This
     event is called during startup with all options in the updated set.
     """
-    updated: Set[str]
+
+    updated: set[str]
 
 
 @dataclass
@@ -82,4 +91,5 @@ class UpdateHook(Hook):
     Update is called when one or more flow objects have been modified,
     usually from a different addon.
     """
+
     flows: Sequence[mitmproxy.flow.Flow]

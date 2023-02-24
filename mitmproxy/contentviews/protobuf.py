@@ -2,18 +2,36 @@ import io
 from typing import Optional
 
 from kaitaistruct import KaitaiStream
+
 from . import base
 from mitmproxy.contrib.kaitaistruct import google_protobuf
 
 
 def write_buf(out, field_tag, body, indent_level):
     if body is not None:
-        out.write("{: <{level}}{}: {}\n".format('', field_tag, body if isinstance(body, int) else str(body, 'utf-8'),
-                                                level=indent_level))
+        out.write(
+            "{: <{level}}{}: {}\n".format(
+                "",
+                field_tag,
+                body if isinstance(body, int) else str(body, "utf-8"),
+                level=indent_level,
+            )
+        )
     elif field_tag is not None:
-        out.write(' ' * indent_level + str(field_tag) + " {\n")
+        out.write(" " * indent_level + str(field_tag) + " {\n")
     else:
-        out.write(' ' * indent_level + "}\n")
+        out.write(" " * indent_level + "}\n")
+
+
+def _parse_proto(raw: bytes) -> list[google_protobuf.GoogleProtobuf.Pair]:
+    """Parse a bytestring into protobuf pairs and make sure that all pairs have a valid wire type."""
+    buf = google_protobuf.GoogleProtobuf(KaitaiStream(io.BytesIO(raw)))
+    for pair in buf.pairs:
+        if not isinstance(
+            pair.wire_type, google_protobuf.GoogleProtobuf.Pair.WireTypes
+        ):
+            raise ValueError("Not a protobuf.")
+    return buf.pairs
 
 
 def format_pbuf(raw):
@@ -21,10 +39,10 @@ def format_pbuf(raw):
     stack = []
 
     try:
-        buf = google_protobuf.GoogleProtobuf(KaitaiStream(io.BytesIO(raw)))
+        pairs = _parse_proto(raw)
     except:
         return False
-    stack.extend([(pair, 0) for pair in buf.pairs[::-1]])
+    stack.extend([(pair, 0) for pair in pairs[::-1]])
 
     while len(stack):
         pair, indent_level = stack.pop()
@@ -42,8 +60,8 @@ def format_pbuf(raw):
             body = pair.value
 
         try:
-            next_buf = google_protobuf.GoogleProtobuf(KaitaiStream(io.BytesIO(body)))
-            stack.extend([(pair, indent_level + 2) for pair in next_buf.pairs[::-1]])
+            pairs = _parse_proto(body)  # type: ignore
+            stack.extend([(pair, indent_level + 2) for pair in pairs[::-1]])
             write_buf(out, pair.field_tag, None, indent_level)
         except:
             write_buf(out, pair.field_tag, body, indent_level)
@@ -79,5 +97,7 @@ class ViewProtobuf(base.View):
 
         return "Protobuf", base.format_text(decoded)
 
-    def render_priority(self, data: bytes, *, content_type: Optional[str] = None, **metadata) -> float:
+    def render_priority(
+        self, data: bytes, *, content_type: Optional[str] = None, **metadata
+    ) -> float:
         return float(bool(data) and content_type in self.__content_types)

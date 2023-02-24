@@ -1,12 +1,16 @@
+import struct
+
 import pytest
 
-from typing import List
-from mitmproxy.contentviews import grpc
-from mitmproxy.contentviews.grpc import ViewGrpcProtobuf, ViewConfig, ProtoParser, parse_grpc_messages
-from mitmproxy.net.encoding import encode
-from mitmproxy.test import tflow, tutils
-import struct
 from . import full_eval
+from mitmproxy.contentviews import grpc
+from mitmproxy.contentviews.grpc import parse_grpc_messages
+from mitmproxy.contentviews.grpc import ProtoParser
+from mitmproxy.contentviews.grpc import ViewConfig
+from mitmproxy.contentviews.grpc import ViewGrpcProtobuf
+from mitmproxy.net.encoding import encode
+from mitmproxy.test import tflow
+from mitmproxy.test import tutils
 
 datadir = "mitmproxy/contentviews/test_grpc_data/"
 
@@ -14,10 +18,11 @@ datadir = "mitmproxy/contentviews/test_grpc_data/"
 def helper_pack_grpc_message(data: bytes, compress=False, encoding="gzip") -> bytes:
     if compress:
         data = encode(data, encoding)
-    header = struct.pack('!?i', compress, len(data))
+    header = struct.pack("!?i", compress, len(data))
     return header + data
 
 
+# fmt: off
 custom_parser_rules = [
     ProtoParser.ParserRuleRequest(
         name = "Geo coordinate lookup request",
@@ -371,7 +376,7 @@ def helper_gen_lendel_msg_field(f_idx: int, f_val: bytes):
     return msg
 
 
-def helper_gen_bits64_msg_field_packed(f_idx: int, values: List[int]):
+def helper_gen_bits64_msg_field_packed(f_idx: int, values: list[int]):
     # manual encoding of protobuf data
     msg_inner = b""
     for f_val in values:
@@ -379,7 +384,7 @@ def helper_gen_bits64_msg_field_packed(f_idx: int, values: List[int]):
     return helper_gen_lendel_msg_field(f_idx, msg_inner)
 
 
-def helper_gen_bits32_msg_field_packed(f_idx: int, values: List[int]):
+def helper_gen_bits32_msg_field_packed(f_idx: int, values: list[int]):
     # manual encoding of protobuf data
     msg_inner = b""
     for f_val in values:
@@ -387,7 +392,7 @@ def helper_gen_bits32_msg_field_packed(f_idx: int, values: List[int]):
     return helper_gen_lendel_msg_field(f_idx, msg_inner)
 
 
-def helper_gen_varint_msg_field_packed(f_idx: int, values: List[int]):
+def helper_gen_varint_msg_field_packed(f_idx: int, values: list[int]):
     # manual encoding of protobuf data
     msg_inner = b""
     for f_val in values:
@@ -395,7 +400,7 @@ def helper_gen_varint_msg_field_packed(f_idx: int, values: List[int]):
     return helper_gen_lendel_msg_field(f_idx, msg_inner)
 
 
-def helper_gen_lendel_msg_field_packed(f_idx: int, values: List[bytes]):
+def helper_gen_lendel_msg_field_packed(f_idx: int, values: list[bytes]):
     # manual encoding of protobuf data
     msg_inner = b""
     for f_val in values:
@@ -791,4 +796,5 @@ def test_render_priority():
     assert v.render_priority(b"data", content_type="application/x-protobuffer")
     assert v.render_priority(b"data", content_type="application/grpc-proto")
     assert v.render_priority(b"data", content_type="application/grpc")
+    assert v.render_priority(b"data", content_type="application/prpc")
     assert not v.render_priority(b"data", content_type="text/plain")

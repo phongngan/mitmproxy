@@ -3,12 +3,13 @@ from unittest.mock import Mock
 import pytest
 
 from mitmproxy import connection
-from mitmproxy.proxy import events, commands
+from mitmproxy.proxy import commands
+from mitmproxy.proxy import events
 
 
 @pytest.fixture
 def tconn() -> connection.Server:
-    return connection.Server(None)
+    return connection.Server(address=None)
 
 
 def test_dataclasses(tconn):
@@ -26,6 +27,7 @@ def test_command_completed():
         pass
 
     with pytest.warns(RuntimeWarning, match="properly annotated"):
+
         class FooCompleted(events.CommandCompleted):
             pass
 
@@ -33,5 +35,6 @@ def test_command_completed():
         command: FooCommand
 
     with pytest.warns(RuntimeWarning, match="conflicting subclasses"):
+
         class FooCompleted2(events.CommandCompleted):
             command: FooCommand

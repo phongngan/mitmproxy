@@ -19,26 +19,18 @@ from mitmproxy.tools import main
 script.ReloadInterval = 0.1
 
 
-async def test_load_script(tdata):
-    with taddons.context() as tctx:
-        ns = script.load_script(
-            tdata.path(
-                "mitmproxy/data/addonscripts/recorder/recorder.py"
-            )
-        )
-        assert ns.addons
+def test_load_script(tmp_path, tdata, caplog):
+    ns = script.load_script(
+        tdata.path("mitmproxy/data/addonscripts/recorder/recorder.py")
+    )
+    assert ns.addons
 
-        script.load_script(
-            "nonexistent"
-        )
-        await tctx.master.await_log("No such file or directory")
+    script.load_script("nonexistent")
+    assert "No such file or directory" in caplog.text
 
-        script.load_script(
-            tdata.path(
-                "mitmproxy/data/addonscripts/recorder/error.py"
-            )
-        )
-        await tctx.master.await_log("invalid syntax")
+    (tmp_path / "error.py").write_text("this is invalid syntax")
+    script.load_script(str(tmp_path / "error.py"))
+    assert "invalid syntax" in caplog.text
 
 
 def test_load_fullname(tdata):
@@ -47,16 +39,10 @@ def test_load_fullname(tdata):
     This only succeeds if they get assigned different basenames.
 
     """
-    ns = script.load_script(
-        tdata.path(
-            "mitmproxy/data/addonscripts/addon.py"
-        )
-    )
+    ns = script.load_script(tdata.path("mitmproxy/data/addonscripts/addon.py"))
     assert ns.addons
     ns2 = script.load_script(
-        tdata.path(
-            "mitmproxy/data/addonscripts/same_filename/addon.py"
-        )
+        tdata.path("mitmproxy/data/addonscripts/same_filename/addon.py")
     )
     assert ns.name != ns2.name
     assert not hasattr(ns2, "addons")
@@ -75,22 +61,18 @@ class TestScript:
         """
         path = tdata.path("mitmproxy/data/addonscripts/recorder/recorder.py")
 
-        s = script.Script(
-            f'"{path}"',
-            False
-        )
+        s = script.Script(f'"{path}"', False)
         assert '"' not in s.fullpath
 
-    async def test_simple(self, tdata):
+    async def test_simple(self, tdata, caplog_async):
+        caplog_async.set_level("DEBUG")
         sc = script.Script(
-            tdata.path(
-                "mitmproxy/data/addonscripts/recorder/recorder.py"
-            ),
+            tdata.path("mitmproxy/data/addonscripts/recorder/recorder.py"),
             True,
         )
         with taddons.context(sc) as tctx:
             tctx.configure(sc)
-            await tctx.master.await_log("recorder configure")
+            await caplog_async.await_log("recorder configure")
             rec = tctx.master.addons.get("recorder")
 
             assert rec.call_log[0][0:2] == ("recorder", "load")
@@ -100,42 +82,59 @@ class TestScript:
             tctx.master.addons.trigger(HttpRequestHook(f))
 
             assert rec.call_log[0][1] == "request"
+        sc.done()
 
-    async def test_reload(self, tmpdir):
+    async def test_reload(self, tmp_path, caplog_async):
+        caplog_async.set_level("INFO")
         with taddons.context() as tctx:
-            f = tmpdir.join("foo.py")
-            f.ensure(file=True)
-            f.write("\n")
+            f = tmp_path / "foo.py"
+            f.write_text("\n")
             sc = script.Script(str(f), True)
             tctx.configure(sc)
-            await tctx.master.await_log("Loading")
+            await caplog_async.await_log("Loading")
+            caplog_async.clear()
 
-            tctx.master.clear()
             for i in range(20):
-                f.write("\n")
-                if tctx.master.has_log("Loading"):
+                # Some filesystems only have second-level granularity,
+                # so just writing once again is not good enough.
+                f.write_text("\n")
+                if "Loading" in caplog_async.caplog.text:
                     break
                 await asyncio.sleep(0.1)
             else:
                 raise AssertionError("No reload seen")
+            sc.done()
 
-    async def test_exception(self, tdata):
+    async def test_exception(self, tdata, caplog_async):
+        caplog_async.set_level("INFO")
         with taddons.context() as tctx:
             sc = script.Script(
                 tdata.path("mitmproxy/data/addonscripts/error.py"),
                 True,
             )
             tctx.master.addons.add(sc)
-            await tctx.master.await_log("error load")
+            await caplog_async.await_log("error load")
             tctx.configure(sc)
 
             f = tflow.tflow(resp=True)
             tctx.master.addons.trigger(HttpRequestHook(f))
 
-            await tctx.master.await_log("ValueError: Error!")
-            await tctx.master.await_log("error.py")
+            await caplog_async.await_log("ValueError: Error!")
+            await caplog_async.await_log("error.py")
+            sc.done()
 
-    async def test_optionexceptions(self, tdata):
+    async def test_import_error(self, monkeypatch, tdata, caplog):
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        script.Script(
+            tdata.path("mitmproxy/data/addonscripts/import_error.py"),
+            False,
+        )
+        assert (
+            "Note that mitmproxy's binaries include their own Python environment"
+            in caplog.text
+        )
+
+    async def test_optionexceptions(self, tdata, caplog_async):
         with taddons.context() as tctx:
             sc = script.Script(
                 tdata.path("mitmproxy/data/addonscripts/configure.py"),
@@ -143,21 +142,22 @@ class TestScript:
             )
             tctx.master.addons.add(sc)
             tctx.configure(sc)
-            await tctx.master.await_log("Options Error")
+            await caplog_async.await_log("Options Error")
+            sc.done()
 
-    async def test_addon(self, tdata):
+    async def test_addon(self, tdata, caplog_async):
+        caplog_async.set_level("INFO")
         with taddons.context() as tctx:
-            sc = script.Script(
-                tdata.path(
-                    "mitmproxy/data/addonscripts/addon.py"
-                ),
-                True
-            )
+            sc = script.Script(tdata.path("mitmproxy/data/addonscripts/addon.py"), True)
             tctx.master.addons.add(sc)
-            await tctx.master.await_log("addon running")
+            await caplog_async.await_log("addon running")
             assert sc.ns.event_log == [
-                'scriptload', 'addonload', 'scriptconfigure', 'addonconfigure'
+                "scriptload",
+                "addonload",
+                "scriptconfigure",
+                "addonconfigure",
             ]
+            sc.done()
 
 
 class TestCutTraceback:
@@ -179,24 +179,29 @@ class TestCutTraceback:
 
 
 class TestScriptLoader:
-    async def test_script_run(self, tdata):
+    async def test_script_run(self, tdata, caplog_async):
+        caplog_async.set_level("DEBUG")
         rp = tdata.path("mitmproxy/data/addonscripts/recorder/recorder.py")
         sc = script.ScriptLoader()
-        with taddons.context(sc) as tctx:
+        with taddons.context(sc):
             sc.script_run([tflow.tflow(resp=True)], rp)
-            await tctx.master.await_log("recorder response")
-            debug = [i.msg for i in tctx.master.logs if i.level == "debug"]
+            await caplog_async.await_log("recorder response")
+            debug = [
+                i.msg for i in caplog_async.caplog.records if i.levelname == "DEBUG"
+            ]
             assert debug == [
-                'recorder configure', 'recorder running',
-                'recorder requestheaders', 'recorder request',
-                'recorder responseheaders', 'recorder response'
+                "recorder configure",
+                "recorder running",
+                "recorder requestheaders",
+                "recorder request",
+                "recorder responseheaders",
+                "recorder response",
             ]
 
-    async def test_script_run_nonexistent(self):
+    async def test_script_run_nonexistent(self, caplog):
         sc = script.ScriptLoader()
-        with taddons.context(sc) as tctx:
-            sc.script_run([tflow.tflow(resp=True)], "/")
-            await tctx.master.await_log("No such script")
+        sc.script_run([tflow.tflow(resp=True)], "/")
+        assert "No such script" in caplog.text
 
     async def test_simple(self, tdata):
         sc = script.ScriptLoader()
@@ -205,15 +210,11 @@ class TestScriptLoader:
             sc.running()
             assert len(tctx.master.addons) == 1
             tctx.master.options.update(
-                scripts = [
-                    tdata.path(
-                        "mitmproxy/data/addonscripts/recorder/recorder.py"
-                    )
-                ]
+                scripts=[tdata.path("mitmproxy/data/addonscripts/recorder/recorder.py")]
             )
             assert len(tctx.master.addons) == 1
             assert len(sc.addons) == 1
-            tctx.master.options.update(scripts = [])
+            tctx.master.options.update(scripts=[])
             assert len(tctx.master.addons) == 1
             assert len(sc.addons) == 0
 
@@ -221,105 +222,110 @@ class TestScriptLoader:
         sc = script.ScriptLoader()
         with taddons.context(sc) as tctx:
             with pytest.raises(exceptions.OptionsError):
-                tctx.configure(
-                    sc,
-                    scripts = ["one", "one"]
-                )
+                tctx.configure(sc, scripts=["one", "one"])
 
-    async def test_script_deletion(self, tdata):
+    async def test_script_deletion(self, tdata, caplog_async):
+        caplog_async.set_level("INFO")
         tdir = tdata.path("mitmproxy/data/addonscripts/")
-        with open(tdir + "/dummy.py", 'w') as f:
+        with open(tdir + "/dummy.py", "w") as f:
             f.write("\n")
 
         with taddons.context() as tctx:
             sl = script.ScriptLoader()
             tctx.master.addons.add(sl)
-            tctx.configure(sl, scripts=[tdata.path("mitmproxy/data/addonscripts/dummy.py")])
-            await tctx.master.await_log("Loading")
+            tctx.configure(
+                sl, scripts=[tdata.path("mitmproxy/data/addonscripts/dummy.py")]
+            )
+            await caplog_async.await_log("Loading")
 
             os.remove(tdata.path("mitmproxy/data/addonscripts/dummy.py"))
 
-            await tctx.master.await_log("Removing")
+            await caplog_async.await_log("Removing")
             await asyncio.sleep(0.1)
             assert not tctx.options.scripts
             assert not sl.addons
 
-    async def test_script_error_handler(self):
+    async def test_script_error_handler(self, caplog):
         path = "/sample/path/example.py"
         exc = SyntaxError
         msg = "Error raised"
         tb = True
-        with taddons.context() as tctx:
+        with taddons.context():
             script.script_error_handler(path, exc, msg, tb)
-            await tctx.master.await_log("/sample/path/example.py")
-            await tctx.master.await_log("Error raised")
-            await tctx.master.await_log("lineno")
-            await tctx.master.await_log("NoneType")
+            assert "/sample/path/example.py" in caplog.text
+            assert "Error raised" in caplog.text
+            assert "lineno" in caplog.text
+            assert "NoneType" in caplog.text
 
-    async def test_order(self, tdata):
+    async def test_order(self, tdata, caplog_async):
+        caplog_async.set_level("DEBUG")
         rec = tdata.path("mitmproxy/data/addonscripts/recorder")
         sc = script.ScriptLoader()
         sc.is_running = True
         with taddons.context(sc) as tctx:
             tctx.configure(
                 sc,
-                scripts = [
+                scripts=[
                     "%s/a.py" % rec,
                     "%s/b.py" % rec,
                     "%s/c.py" % rec,
-                ]
+                ],
             )
-            await tctx.master.await_log("configure")
-            debug = [i.msg for i in tctx.master.logs if i.level == "debug"]
+            await caplog_async.await_log("configure")
+            debug = [
+                i.msg for i in caplog_async.caplog.records if i.levelname == "DEBUG"
+            ]
             assert debug == [
-                'a load',
-                'a configure',
-                'a running',
-
-                'b load',
-                'b configure',
-                'b running',
-
-                'c load',
-                'c configure',
-                'c running',
+                "a load",
+                "a configure",
+                "a running",
+                "b load",
+                "b configure",
+                "b running",
+                "c load",
+                "c configure",
+                "c running",
             ]
 
-            tctx.master.clear()
+            caplog_async.clear()
             tctx.configure(
                 sc,
-                scripts = [
+                scripts=[
                     "%s/c.py" % rec,
                     "%s/a.py" % rec,
                     "%s/b.py" % rec,
-                ]
+                ],
             )
 
-            await tctx.master.await_log("b configure")
-            debug = [i.msg for i in tctx.master.logs if i.level == "debug"]
+            await caplog_async.await_log("b configure")
+            debug = [
+                i.msg for i in caplog_async.caplog.records if i.levelname == "DEBUG"
+            ]
             assert debug == [
-                'c configure',
-                'a configure',
-                'b configure',
+                "c configure",
+                "a configure",
+                "b configure",
             ]
 
-            tctx.master.clear()
+            caplog_async.clear()
             tctx.configure(
                 sc,
-                scripts = [
+                scripts=[
                     "%s/e.py" % rec,
                     "%s/a.py" % rec,
-                ]
+                ],
             )
-            await tctx.master.await_log("e configure")
-            debug = [i.msg for i in tctx.master.logs if i.level == "debug"]
+            await caplog_async.await_log("e configure")
+            debug = [
+                i.msg for i in caplog_async.caplog.records if i.levelname == "DEBUG"
+            ]
             assert debug == [
-                'c done',
-                'b done',
-                'a configure',
-                'e load',
-                'e configure',
-                'e running',
+                "c done",
+                "b done",
+                "a configure",
+                "e load",
+                "e configure",
+                "e running",
             ]
 
             # stop reload tasks
@@ -328,17 +334,22 @@ class TestScriptLoader:
 
 def test_order(tdata, capsys):
     """Integration test: Make sure that the runtime hooks are triggered on startup in the correct order."""
-    main.mitmdump([
-        "-n",
-        "-s", tdata.path("mitmproxy/data/addonscripts/recorder/recorder.py"),
-        "-s", tdata.path("mitmproxy/data/addonscripts/shutdown.py"),
-    ])
+    main.mitmdump(
+        [
+            "-n",
+            "-s",
+            tdata.path("mitmproxy/data/addonscripts/recorder/recorder.py"),
+            "-s",
+            tdata.path("mitmproxy/data/addonscripts/shutdown.py"),
+        ]
+    )
+    time = r"\[[\d:.]+\] "
     assert re.match(
-        r"Loading script.+recorder.py\n"
-        r"\('recorder', 'load', .+\n"
-        r"\('recorder', 'configure', .+\n"
-        r"Loading script.+shutdown.py\n"
-        r"\('recorder', 'running', .+\n"
-        r"\('recorder', 'done', .+\n$",
+        rf"{time}Loading script.+recorder.py\n"
+        rf"{time}\('recorder', 'load', .+\n"
+        rf"{time}\('recorder', 'configure', .+\n"
+        rf"{time}Loading script.+shutdown.py\n"
+        rf"{time}\('recorder', 'running', .+\n"
+        rf"{time}\('recorder', 'done', .+\n$",
         capsys.readouterr().out,
     )

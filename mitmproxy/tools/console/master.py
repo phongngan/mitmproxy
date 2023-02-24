@@ -1,7 +1,6 @@
 import asyncio
-import mailcap
+import contextlib
 import mimetypes
-import os
 import os.path
 import shlex
 import shutil
@@ -9,21 +8,21 @@ import stat
 import subprocess
 import sys
 import tempfile
-import contextlib
 import threading
-
-from tornado.platform.asyncio import AddThreadSelectorEventLoop
+from typing import TypeVar
 
 import urwid
+from tornado.platform.asyncio import AddThreadSelectorEventLoop
 
 from mitmproxy import addons
-from mitmproxy import master
 from mitmproxy import log
-from mitmproxy.addons import errorcheck, intercept
+from mitmproxy import master
+from mitmproxy import options
+from mitmproxy.addons import errorcheck
 from mitmproxy.addons import eventstore
+from mitmproxy.addons import intercept
 from mitmproxy.addons import readfile
 from mitmproxy.addons import view
-from mitmproxy.contrib.tornado import patch_tornado
 from mitmproxy.tools.console import consoleaddons
 from mitmproxy.tools.console import defaultkeys
 from mitmproxy.tools.console import keymap
@@ -32,9 +31,11 @@ from mitmproxy.tools.console import signals
 from mitmproxy.tools.console import window
 
 
-class ConsoleMaster(master.Master):
+T = TypeVar("T", str, bytes)
 
-    def __init__(self, opts):
+
+class ConsoleMaster(master.Master):
+    def __init__(self, opts: options.Options) -> None:
         super().__init__(opts)
 
         self.view: view.View = view.View()
@@ -46,8 +47,6 @@ class ConsoleMaster(master.Master):
         defaultkeys.map(self.keymap)
         self.options.errored.connect(self.options_error)
 
-        self.view_stack = []
-
         self.addons.add(*addons.default_addons())
         self.addons.add(
             intercept.Intercept(),
@@ -55,48 +54,47 @@ class ConsoleMaster(master.Master):
             self.events,
             readfile.ReadFile(),
             consoleaddons.ConsoleAddon(self),
-            keymap.KeymapConfig(),
+            keymap.KeymapConfig(self),
             errorcheck.ErrorCheck(log_to_stderr=True),
         )
 
-        self.window = None
+        self.window: window.Window | None = None
 
     def __setattr__(self, name, value):
         super().__setattr__(name, value)
-        signals.update_settings.send(self)
+        signals.update_settings.send()
 
-    def options_error(self, opts, exc):
-        signals.status_message.send(
-            message=str(exc),
-            expire=1
-        )
+    def options_error(self, exc) -> None:
+        signals.status_message.send(message=str(exc), expire=1)
 
-    def prompt_for_exit(self):
+    def prompt_for_exit(self) -> None:
         signals.status_prompt_onekey.send(
-            self,
-            prompt = "Quit",
-            keys = (
+            prompt="Quit",
+            keys=[
                 ("yes", "y"),
                 ("no", "n"),
-            ),
-            callback = self.quit,
+            ],
+            callback=self.quit,
         )
 
-    def sig_add_log(self, event_store, entry: log.LogEntry):
-        if log.log_tier(self.options.console_eventlog_verbosity) < log.log_tier(entry.level):
+    def sig_add_log(self, entry: log.LogEntry):
+        if log.log_tier(self.options.console_eventlog_verbosity) < log.log_tier(
+            entry.level
+        ):
             return
         if entry.level in ("error", "warn", "alert"):
             signals.status_message.send(
-                message = (
+                message=(
                     entry.level,
-                    f"{entry.level.title()}: {str(entry.msg).lstrip()}"
+                    f"{entry.level.title()}: {str(entry.msg).lstrip()}",
                 ),
-                expire=5
+                expire=5,
             )
 
-    def sig_call_in(self, sender, seconds, callback, args=()):
+    def sig_call_in(self, seconds, callback):
         def cb(*_):
-            return callback(*args)
+            return callback()
+
         self.loop.set_alarm_in(seconds, cb)
 
     @contextlib.contextmanager
@@ -123,9 +121,9 @@ class ConsoleMaster(master.Master):
         else:
             return "vi"
 
-    def spawn_editor(self, data):
+    def spawn_editor(self, data: T) -> T:
         text = not isinstance(data, bytes)
-        fd, name = tempfile.mkstemp('', "mitmproxy", text=text)
+        fd, name = tempfile.mkstemp("", "mitmproxy", text=text)
         with open(fd, "w" if text else "wb") as f:
             f.write(data)
         c = self.get_editor()
@@ -135,9 +133,7 @@ class ConsoleMaster(master.Master):
             try:
                 subprocess.call(cmd)
             except:
-                signals.status_message.send(
-                    message="Can't start editor: %s" % c
-                )
+                signals.status_message.send(message="Can't start editor: %s" % c)
             else:
                 with open(name, "r" if text else "rb") as f:
                     data = f.read()
@@ -157,24 +153,20 @@ class ConsoleMaster(master.Master):
         # read-only to remind the user that this is a view function
         os.chmod(name, stat.S_IREAD)
 
-        cmd = None
-        shell = False
+        # hm which one should get priority?
+        c = (
+            os.environ.get("MITMPROXY_EDITOR")
+            or os.environ.get("PAGER")
+            or os.environ.get("EDITOR")
+        )
+        if not c:
+            c = "less"
+        cmd = shlex.split(c)
+        cmd.append(name)
 
-        if contenttype:
-            c = mailcap.getcaps()
-            cmd, _ = mailcap.findmatch(c, contenttype, filename=name)
-            if cmd:
-                shell = True
-        if not cmd:
-            # hm which one should get priority?
-            c = os.environ.get("MITMPROXY_EDITOR") or os.environ.get("PAGER") or os.environ.get("EDITOR")
-            if not c:
-                c = "less"
-            cmd = shlex.split(c)
-            cmd.append(name)
         with self.uistopped():
             try:
-                subprocess.call(cmd, shell=shell)
+                subprocess.call(cmd, shell=False)
             except:
                 signals.status_message.send(
                     message="Can't start external viewer: %s" % " ".join(c)
@@ -183,10 +175,10 @@ class ConsoleMaster(master.Master):
         t = threading.Timer(1.0, os.unlink, args=[name])
         t.start()
 
-    def set_palette(self, opts, updated):
+    def set_palette(self, *_) -> None:
         self.ui.register_palette(
-            palettes.palettes[opts.console_palette].palette(
-                opts.console_palette_transparent
+            palettes.palettes[self.options.console_palette].palette(
+                self.options.console_palette_transparent
             )
         )
         self.ui.clear()
@@ -196,15 +188,19 @@ class ConsoleMaster(master.Master):
 
     async def running(self) -> None:
         if not sys.stdout.isatty():
-            print("Error: mitmproxy's console interface requires a tty. "
-                  "Please run mitmproxy in an interactive shell environment.", file=sys.stderr)
+            print(
+                "Error: mitmproxy's console interface requires a tty. "
+                "Please run mitmproxy in an interactive shell environment.",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
-        if os.name != "nt" and "utf" not in urwid.detected_encoding.lower():
+        detected_encoding = urwid.detected_encoding.lower()
+        if os.name != "nt" and detected_encoding and "utf" not in detected_encoding:
             print(
                 f"mitmproxy expects a UTF-8 console environment, not {urwid.detected_encoding!r}. "
                 f"Set your LANG environment variable to something like en_US.UTF-8.",
-                file=sys.stderr
+                file=sys.stderr,
             )
             # Experimental (04/2022): We just don't exit here and see if/how that affects users.
             # sys.exit(1)
@@ -213,15 +209,13 @@ class ConsoleMaster(master.Master):
         signals.call_in.connect(self.sig_call_in)
         self.ui = window.Screen()
         self.ui.set_terminal_properties(256)
-        self.set_palette(self.options, None)
+        self.set_palette(None)
         self.options.subscribe(
-            self.set_palette,
-            ["console_palette", "console_palette_transparent"]
+            self.set_palette, ["console_palette", "console_palette_transparent"]
         )
 
         loop = asyncio.get_running_loop()
         if isinstance(loop, getattr(asyncio, "ProactorEventLoop", tuple())):
-            patch_tornado()
             # fix for https://bugs.python.org/issue37373
             loop = AddThreadSelectorEventLoop(loop)  # type: ignore
         self.loop = urwid.MainLoop(
@@ -243,9 +237,11 @@ class ConsoleMaster(master.Master):
         await super().done()
 
     def overlay(self, widget, **kwargs):
+        assert self.window
         self.window.set_overlay(widget, **kwargs)
 
     def switch_view(self, name):
+        assert self.window
         self.window.push(name)
 
     def quit(self, a):
