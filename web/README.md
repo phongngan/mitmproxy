@@ -1,4 +1,4 @@
-# Quick Start
+ # Quick Start
 
 - Install mitmproxy as described in [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
 - Run `node --version` to make sure that you have at least Node.js 14 or above. If you are on **Ubuntu <= 20.04**, you

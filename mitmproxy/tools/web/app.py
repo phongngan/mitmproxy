@@ -8,8 +8,11 @@ import os.path
 import random
 import string
 import re
+import random
+import string
 from collections.abc import Callable
 from collections.abc import Sequence
+
 from io import BytesIO
 from itertools import islice
 from typing import ClassVar
@@ -38,6 +41,8 @@ from mitmproxy.udp import UDPMessage
 from mitmproxy.utils.emoji import emoji
 from mitmproxy.utils.strutils import always_str
 from mitmproxy.websocket import WebSocketMessage
+from pprint import pprint
+
 
 
 def cert_to_json(certs: Sequence[certs.Cert]) -> dict | None:
@@ -224,9 +229,10 @@ class RequestHandler(tornado.web.RequestHandler):
 
     @property
     def json(self):
-        if not self.request.headers.get("Content-Type", "").startswith(
-            "application/json"
-        ):
+        print("-----------json-------------")
+        print(self.request.body.decode())
+        if not self.request.headers.get("Content-Type", "").startswith("application/json"):
+
             raise APIError(400, "Invalid Content-Type, expected application/json.")
         try:
             return json.loads(self.request.body.decode())
@@ -287,9 +293,13 @@ class WebSocketEventBroadcaster(tornado.websocket.WebSocketHandler):
     _send_tasks: ClassVar[set[asyncio.Task]] = set()
 
     def open(self):
+        # print("--------class WebSocketEventBroadcaster(tornado.websocket.WebSocketHandler):: open-----")
         self.connections.add(self)
 
     def on_close(self):
+
+        # print("--------class WebSocketEventBroadcaster(tornado.websocket.WebSocketHandler):: on_close-----")
+
         self.connections.discard(self)
 
     @classmethod
@@ -304,8 +314,13 @@ class WebSocketEventBroadcaster(tornado.websocket.WebSocketHandler):
         cls._send_tasks.add(t)
         t.add_done_callback(cls._send_tasks.remove)
 
+
+    def check_origin(self, origin):
+        return True
+
     @classmethod
     def broadcast(cls, **kwargs):
+        # print("--------class WebSocketEventBroadcaster(tornado.websocket.WebSocketHandler):: broadcast-----")
         message = json.dumps(kwargs, ensure_ascii=False).encode(
             "utf8", "surrogateescape"
         )
@@ -320,10 +335,13 @@ class ClientConnection(WebSocketEventBroadcaster):
 
 class Flows(RequestHandler):
     def get(self):
+        # print("--------class Flows(RequestHandler): GET-----")
+        print(self.view)
         self.write([flow_to_json(f) for f in self.view])
 
 
 class DumpFlows(RequestHandler):
+
     def get(self) -> None:
         self.set_header("Content-Disposition", "attachment; filename=flows")
         self.set_header("Content-Type", "application/octet-stream")
@@ -348,7 +366,9 @@ class DumpFlows(RequestHandler):
                     fw.add(f)
             self.write(bio.getvalue())
 
+
     async def post(self):
+        # print("--------class DumpFlows(RequestHandler): POST-----")
         self.view.clear()
         bio = BytesIO(self.filecontents)
         for f in io.FlowReader(bio).stream():
@@ -358,12 +378,14 @@ class DumpFlows(RequestHandler):
 
 class ClearAll(RequestHandler):
     def post(self):
+        # print("--------class ClearAll(RequestHandler) POST-----")
         self.view.clear()
         self.master.events.clear()
 
 
 class ResumeFlows(RequestHandler):
     def post(self):
+        # print("--------class ResumeFlows(RequestHandler): post-----")
         for f in self.view:
             if not f.intercepted:
                 continue
@@ -373,6 +395,7 @@ class ResumeFlows(RequestHandler):
 
 class KillFlows(RequestHandler):
     def post(self):
+        # print("--------class KillFlows(RequestHandler): post-----")
         for f in self.view:
             if f.killable:
                 f.kill()
@@ -381,12 +404,14 @@ class KillFlows(RequestHandler):
 
 class ResumeFlow(RequestHandler):
     def post(self, flow_id):
+        # print("--------class ResumeFlow(RequestHandler): post-----")
         self.flow.resume()
         self.view.update([self.flow])
 
 
 class KillFlow(RequestHandler):
     def post(self, flow_id):
+        # print("--------class KillFlow(RequestHandler):: post-----")
         if self.flow.killable:
             self.flow.kill()
             self.view.update([self.flow])
@@ -394,6 +419,7 @@ class KillFlow(RequestHandler):
 
 class FlowHandler(RequestHandler):
     def delete(self, flow_id):
+        # print(f"--------class FlowHandler(RequestHandler): delete {flow_id}-----")
         if self.flow.killable:
             self.flow.kill()
         self.view.remove([self.flow])
@@ -640,6 +666,7 @@ class ExecuteCommand(RequestHandler):
 
 class Events(RequestHandler):
     def get(self):
+        # print(f"--------class Events(RequestHandler): get-----")
         self.write([logentry_to_json(e) for e in self.master.events.data])
 
 
@@ -649,6 +676,8 @@ class Options(RequestHandler):
 
     def put(self):
         update = self.json
+        print("--------Option.put--------")
+        print(self.json)
         try:
             self.master.options.update(**update)
         except Exception as err:
@@ -675,6 +704,10 @@ class DnsRebind(RequestHandler):
 
 class State(RequestHandler):
     def get(self):
+
+        # print(f"--------class Conf(RequestHandler): get-----")
+
+
         self.write(
             {
                 "version": version.VERSION,
@@ -693,6 +726,7 @@ class GZipContentAndFlowFiles(tornado.web.GZipContentEncoding):
     }
 
 
+
 class Application(tornado.web.Application):
     master: mitmproxy.tools.web.master.WebMaster
 
@@ -705,12 +739,12 @@ class Application(tornado.web.Application):
             template_path=os.path.join(os.path.dirname(__file__), "templates"),
             static_path=os.path.join(os.path.dirname(__file__), "static"),
             xsrf_cookies=False,
-            cookie_secret=os.urandom(256),
+            cookie_secret="932473894723479",
             debug=debug,
             autoreload=False,
             transforms=[GZipContentAndFlowFiles],
         )
-
+        # print("--------WEB backend has INIT-----")
         self.add_handlers("dns-rebind-protection", [(r"/.*", DnsRebind)])
         self.add_handlers(
             # make mitmweb accessible by IP only to prevent DNS rebinding.
@@ -732,10 +766,8 @@ class Application(tornado.web.Application):
                 (r"/flows/(?P<flow_id>[0-9a-f\-]+)/duplicate", DuplicateFlow),
                 (r"/flows/(?P<flow_id>[0-9a-f\-]+)/replay", ReplayFlow),
                 (r"/flows/(?P<flow_id>[0-9a-f\-]+)/revert", RevertFlow),
-                (
-                    r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|messages)/content.data",
-                    FlowContent,
-                ),
+                (r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|messages)/content.data", FlowContent),
+                (r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|all)/raw", FlowRaw),
                 (
                     r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|all)/raw",
                     FlowRaw,

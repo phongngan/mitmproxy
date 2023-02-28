@@ -85,7 +85,10 @@ export function fetchApi(url: string, options: RequestInit = {}): Promise<Respon
     if (url.startsWith("/")) {
         url = "." + url;
     }
-
+    console.log(url,{
+        credentials: 'same-origin',
+        ...options
+    })
     return fetch(url, {
         credentials: 'same-origin',
         ...options
