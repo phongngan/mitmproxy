@@ -5,6 +5,8 @@ import hashlib
 import json
 import logging
 import os.path
+import random
+import string
 import re
 from collections.abc import Callable
 from collections.abc import Sequence
@@ -504,7 +506,44 @@ class FlowContent(RequestHandler):
         self.set_header("X-Frame-Options", "DENY")
         self.write(message.get_content(strict=False))
 
+class FlowRaw(RequestHandler):
+    # def post(self, flow_id, message):
+    #     self.flow.backup()
+    #     message = getattr(self.flow, message)
+    #     message.content = self.filecontents
+    #     self.view.update([self.flow])
 
+    def get(self, flow_id, message):
+        data={"request":"","response":""}
+        if message in ["all","request"] and self.flow.request != None:
+            headers= f"{self.flow.request.method} {self.flow.request.path} {self.flow.request.http_version}\r\n".encode()
+            for key,val in self.flow.request.headers.items():
+                print(f"{key},{val}")
+                headers+=key.encode()+b": "+val.encode()+b"\r\n"
+            data["request"]=headers+b"\r\n"+self.flow.request.content
+
+
+        if message in ["all","response"] and self.flow.response != None:
+            headers= f"{self.flow.response.http_version} {self.flow.response.status_code} {self.flow.response.reason}\r\n".encode()
+            for key,val in self.flow.response.headers.items():
+                print(f"{key},{val}")
+                headers+=key.encode()+b": "+val.encode()+b"\r\n"
+            data["response"]=headers+b"\r\n"+self.flow.response.content
+        # pprint(vars(self.flow.request.headers))
+        # pprint(vars(self.flow.response.headers))
+        print(1)
+        self.set_header("Content-Type", "application/text")
+        self.set_header("X-Content-Type-Options", "nosniff")
+        self.set_header("X-Frame-Options", "DENY")
+        if message == "all":
+            r = (''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(24))).encode()
+            print(2)
+            while r in data["request"] or r in data["response"]:
+                r = (''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(24))).encode()
+            print(":".join("{:02x}".format(c) for c in (r+data["request"]+r+data["response"]) ))
+            self.write(r+data["request"]+r+data["response"])
+        else:
+           self.write(data[message])
 class FlowContentView(RequestHandler):
     def message_to_json(
         self,
@@ -667,7 +706,7 @@ class Application(tornado.web.Application):
             default_host="dns-rebind-protection",
             template_path=os.path.join(os.path.dirname(__file__), "templates"),
             static_path=os.path.join(os.path.dirname(__file__), "static"),
-            xsrf_cookies=True,
+            xsrf_cookies=False,
             cookie_secret=os.urandom(256),
             debug=debug,
             autoreload=False,
@@ -698,6 +737,10 @@ class Application(tornado.web.Application):
                 (
                     r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|messages)/content.data",
                     FlowContent,
+                ),
+                (
+                    r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|all)/raw",
+                    FlowRaw,
                 ),
                 (
                     r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|messages)/"
