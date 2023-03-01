@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+import pydevd_pycharm
 import asyncio
 import hashlib
 import json
 import logging
 import os.path
-import random
-import string
 import re
 import random
 import string
@@ -39,10 +38,10 @@ from mitmproxy.tcp import TCPMessage
 from mitmproxy.udp import UDPFlow
 from mitmproxy.udp import UDPMessage
 from mitmproxy.utils.emoji import emoji
+from mitmproxy.net.http.http1 import assemble
 from mitmproxy.utils.strutils import always_str
 from mitmproxy.websocket import WebSocketMessage
 from pprint import pprint
-
 
 
 def cert_to_json(certs: Sequence[certs.Cert]) -> dict | None:
@@ -232,7 +231,6 @@ class RequestHandler(tornado.web.RequestHandler):
         print("-----------json-------------")
         print(self.request.body.decode())
         if not self.request.headers.get("Content-Type", "").startswith("application/json"):
-
             raise APIError(400, "Invalid Content-Type, expected application/json.")
         try:
             return json.loads(self.request.body.decode())
@@ -314,7 +312,6 @@ class WebSocketEventBroadcaster(tornado.websocket.WebSocketHandler):
         cls._send_tasks.add(t)
         t.add_done_callback(cls._send_tasks.remove)
 
-
     def check_origin(self, origin):
         return True
 
@@ -352,8 +349,8 @@ class DumpFlows(RequestHandler):
         except ValueError:  # thrown py flowfilter.parse if filter is invalid
             raise APIError(400, f"Invalid filter argument / regex")
         except (
-            KeyError,
-            IndexError,
+                KeyError,
+                IndexError,
         ):  # Key+Index: ["filter"][0] can fail, if it's not set
 
             def match(_) -> bool:
@@ -365,7 +362,6 @@ class DumpFlows(RequestHandler):
                 if match(f):
                     fw.add(f)
             self.write(bio.getvalue())
-
 
     async def post(self):
         # print("--------class DumpFlows(RequestHandler): POST-----")
@@ -530,51 +526,43 @@ class FlowContent(RequestHandler):
         self.set_header("X-Frame-Options", "DENY")
         self.write(message.get_content(strict=False))
 
+
 class FlowRaw(RequestHandler):
-    # def post(self, flow_id, message):
-    #     self.flow.backup()
-    #     message = getattr(self.flow, message)
-    #     message.content = self.filecontents
-    #     self.view.update([self.flow])
-
+    # get raw response/request message
+    # if all: request, response separate with 24 ramdom character
     def get(self, flow_id, message):
-        data={"request":"","response":""}
-        if message in ["all","request"] and self.flow.request != None:
-            headers= f"{self.flow.request.method} {self.flow.request.path} {self.flow.request.http_version}\r\n".encode()
-            for key,val in self.flow.request.headers.items():
-                print(f"{key},{val}")
-                headers+=key.encode()+b": "+val.encode()+b"\r\n"
-            data["request"]=headers+b"\r\n"+self.flow.request.content
-
-
-        if message in ["all","response"] and self.flow.response != None:
-            headers= f"{self.flow.response.http_version} {self.flow.response.status_code} {self.flow.response.reason}\r\n".encode()
-            for key,val in self.flow.response.headers.items():
-                print(f"{key},{val}")
-                headers+=key.encode()+b": "+val.encode()+b"\r\n"
-            data["response"]=headers+b"\r\n"+self.flow.response.content
-        # pprint(vars(self.flow.request.headers))
-        # pprint(vars(self.flow.response.headers))
-        print(1)
+        data = {"request": "", "response": ""}
+        if message in ["all", "request"] and self.flow.request != None:
+            try:
+                data["request"] = assemble.assemble_request(self.flow.request)
+            except:
+                data["request"] = b""
+        if message in ["all", "response"] and self.flow.response != None:
+            try:
+                data["response"] = assemble.assemble_response(self.flow.response)
+            except:
+                data["response"] = b""
         self.set_header("Content-Type", "application/text")
         self.set_header("X-Content-Type-Options", "nosniff")
         self.set_header("X-Frame-Options", "DENY")
         if message == "all":
-            r = (''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(24))).encode()
-            print(2)
-            while r in data["request"] or r in data["response"]:
-                r = (''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(24))).encode()
-            print(":".join("{:02x}".format(c) for c in (r+data["request"]+r+data["response"]) ))
-            self.write(r+data["request"]+r+data["response"])
+            r = (''.join(
+                random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(24))).encode()
+            while data["request"].find(r) >= 0 or data["response"].find(r) >= 0:
+                r = (''.join(
+                    random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(24))).encode()
+            self.write(r + data["request"] + r + data["response"])
         else:
-           self.write(data[message])
+            self.write(data[message])
+
+
 class FlowContentView(RequestHandler):
     def message_to_json(
-        self,
-        viewname: str,
-        message: http.Message | TCPMessage | UDPMessage | WebSocketMessage,
-        flow: HTTPFlow | TCPFlow | UDPFlow,
-        max_lines: int | None = None,
+            self,
+            viewname: str,
+            message: http.Message | TCPMessage | UDPMessage | WebSocketMessage,
+            flow: HTTPFlow | TCPFlow | UDPFlow,
+            max_lines: int | None = None,
     ):
         description, lines, error = contentviews.get_message_content_view(
             viewname, message, flow
@@ -698,15 +686,13 @@ class DnsRebind(RequestHandler):
         raise tornado.web.HTTPError(
             403,
             reason="To protect against DNS rebinding, mitmweb can only be accessed by IP at the moment. "
-            "(https://github.com/mitmproxy/mitmproxy/issues/3234)",
+                   "(https://github.com/mitmproxy/mitmproxy/issues/3234)",
         )
 
 
 class State(RequestHandler):
     def get(self):
-
         # print(f"--------class Conf(RequestHandler): get-----")
-
 
         self.write(
             {
@@ -726,12 +712,11 @@ class GZipContentAndFlowFiles(tornado.web.GZipContentEncoding):
     }
 
 
-
 class Application(tornado.web.Application):
     master: mitmproxy.tools.web.master.WebMaster
 
     def __init__(
-        self, master: mitmproxy.tools.web.master.WebMaster, debug: bool
+            self, master: mitmproxy.tools.web.master.WebMaster, debug: bool
     ) -> None:
         self.master = master
         super().__init__(
@@ -744,6 +729,7 @@ class Application(tornado.web.Application):
             autoreload=False,
             transforms=[GZipContentAndFlowFiles],
         )
+        pydevd_pycharm.settrace('localhost', port=52011, stdoutToServer=True, stderrToServer=True)
         # print("--------WEB backend has INIT-----")
         self.add_handlers("dns-rebind-protection", [(r"/.*", DnsRebind)])
         self.add_handlers(

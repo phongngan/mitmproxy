@@ -73,6 +73,7 @@ setup(
     # https://packaging.python.org/en/latest/discussions/install-requires-vs-requirements/#install-requires
     # It is not considered best practice to use install_requires to pin dependencies to specific versions.
     install_requires=[
+        "pydevd-pycharm~=222.4459.20",
         "aioquic_mitmproxy>=0.9.20,<0.10",
         "asgiref>=3.2.10,<3.7",
         "Brotli>=1.0,<1.1",
