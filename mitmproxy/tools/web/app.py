@@ -555,6 +555,73 @@ class FlowRaw(RequestHandler):
         else:
             self.write(data[message])
 
+class FlowModify(RequestHandler):
+    def post(self, flow_id) -> None:
+        flow: mitmproxy.flow.Flow = self.flow
+        flow.backup()
+        try:
+            msgType = self.json["messageType"]
+            if msgType == "REQUEST" and hasattr(flow, "request"):
+                request: mitmproxy.http.Request = flow.request
+                b64Data  = self.json["data"]
+            elif msgType == "RESPONSE" and hasattr(flow, "response"):
+
+            for a, b in self.json.items():
+                if a == "messageType" and hasattr(flow, "request"):
+                    request: mitmproxy.http.Request = flow.request
+                    for k, v in b.items():
+                        if k in ["method", "scheme", "host", "path", "http_version"]:
+                            setattr(request, k, str(v))
+                        elif k == "port":
+                            request.port = int(v)
+                        elif k == "headers":
+                            request.headers.clear()
+                            for header in v:
+                                request.headers.add(*header)
+                        elif k == "trailers":
+                            if request.trailers is not None:
+                                request.trailers.clear()
+                            else:
+                                request.trailers = mitmproxy.http.Headers()
+                            for trailer in v:
+                                request.trailers.add(*trailer)
+                        elif k == "content":
+                            request.text = v
+                        else:
+                            raise APIError(400, f"Unknown update request.{k}: {v}")
+
+                elif a == "response" and hasattr(flow, "response"):
+                    response: mitmproxy.http.Response = flow.response
+                    for k, v in b.items():
+                        if k in ["msg", "http_version"]:
+                            setattr(response, k, str(v))
+                        elif k == "code":
+                            response.status_code = int(v)
+                        elif k == "headers":
+                            response.headers.clear()
+                            for header in v:
+                                response.headers.add(*header)
+                        elif k == "trailers":
+                            if response.trailers is not None:
+                                response.trailers.clear()
+                            else:
+                                response.trailers = mitmproxy.http.Headers()
+                            for trailer in v:
+                                response.trailers.add(*trailer)
+                        elif k == "content":
+                            response.text = v
+                        else:
+                            raise APIError(400, f"Unknown update response.{k}: {v}")
+                elif a == "marked":
+                    flow.marked = b
+                else:
+                    raise APIError(400, f"Unknown update {a}: {b}")
+        except APIError:
+            flow.revert()
+            raise
+        self.view.update([flow])
+
+
 
 class FlowContentView(RequestHandler):
     def message_to_json(
@@ -754,10 +821,7 @@ class Application(tornado.web.Application):
                 (r"/flows/(?P<flow_id>[0-9a-f\-]+)/revert", RevertFlow),
                 (r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|messages)/content.data", FlowContent),
                 (r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|all)/raw", FlowRaw),
-                (
-                    r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|all)/raw",
-                    FlowRaw,
-                ),
+                (r"/flows/(?P<flow_id>[0-9a-f\-]+)/modify",FlowModify),
                 (
                     r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|messages)/"
                     r"content/(?P<content_view>[0-9a-zA-Z\-\_%]+)(?:\.json)?",
