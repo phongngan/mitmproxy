@@ -27,6 +27,19 @@ def assemble_response(response):
     )
     return head + body
 
+def assemble_decompressed_response(response):
+    if response.data.content is None:
+        raise ValueError("Cannot assemble flow with missing content")
+    head = assemble_response_head(response)
+    # note = b""
+    # c_len = response.headers.get("Content-Length","")
+    # if(c_len.isDigit())
+    body = b"".join(
+        assemble_body(
+            response.headers, [response.content], response.trailers
+        )
+    )
+    return head + body
 
 def assemble_response_head(response):
     first_line = _assemble_response_line(response.data)
@@ -63,14 +76,14 @@ def _assemble_request_line(request_data):
             request_data.authority,
             request_data.http_version,
         )
-    elif request_data.authority:
-        return b"%s %s://%s%s %s" % (
-            request_data.method,
-            request_data.scheme,
-            request_data.authority,
-            request_data.path,
-            request_data.http_version,
-        )
+    # elif request_data.authority:
+    #     return b"%s %s://%s%s %s" % (
+    #         request_data.method,
+    #         request_data.scheme,
+    #         request_data.authority,
+    #         request_data.path,
+    #         request_data.http_version,
+    #     )
     else:
         return b"%s %s %s" % (
             request_data.method,

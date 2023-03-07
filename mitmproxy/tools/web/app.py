@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 import pydevd_pycharm
 import asyncio
 import hashlib
@@ -400,7 +402,7 @@ class KillFlows(RequestHandler):
 
 class ResumeFlow(RequestHandler):
     def post(self, flow_id):
-        # print("--------class ResumeFlow(RequestHandler): post-----")
+        print(f"resume [id: {flow_id}]")
         self.flow.resume()
         self.view.update([self.flow])
 
@@ -539,9 +541,13 @@ class FlowRaw(RequestHandler):
                 data["request"] = b""
         if message in ["all", "response"] and self.flow.response != None:
             try:
-                data["response"] = assemble.assemble_response(self.flow.response)
+                data["response"] = assemble.assemble_decompressed_response(self.flow.response)
             except:
                 data["response"] = b""
+        if data["request"] == None or type(data["request"]) == type(""):
+            data["request"] = b""
+        if data["response"] == None or type(data["response"]) == type(""):
+            data["response"] = b""
         self.set_header("Content-Type", "application/text")
         self.set_header("X-Content-Type-Options", "nosniff")
         self.set_header("X-Frame-Options", "DENY")
@@ -555,72 +561,121 @@ class FlowRaw(RequestHandler):
         else:
             self.write(data[message])
 
+
 class FlowModify(RequestHandler):
-    def post(self, flow_id) -> None:
+
+    def post(self, flow_id, message):
+
         flow: mitmproxy.flow.Flow = self.flow
         flow.backup()
         try:
-            msgType = self.json["messageType"]
-            if msgType == "REQUEST" and hasattr(flow, "request"):
+            msg_type = message
+            if msg_type == "request" and hasattr(flow, "request"):
                 request: mitmproxy.http.Request = flow.request
-                b64Data  = self.json["data"]
-            elif msgType == "RESPONSE" and hasattr(flow, "response"):
+                message_bytes = base64.b64decode(self.json["raw"])
+                data = self._parseRequest(message_bytes)
 
-            for a, b in self.json.items():
-                if a == "messageType" and hasattr(flow, "request"):
-                    request: mitmproxy.http.Request = flow.request
-                    for k, v in b.items():
-                        if k in ["method", "scheme", "host", "path", "http_version"]:
-                            setattr(request, k, str(v))
-                        elif k == "port":
-                            request.port = int(v)
-                        elif k == "headers":
-                            request.headers.clear()
-                            for header in v:
-                                request.headers.add(*header)
-                        elif k == "trailers":
-                            if request.trailers is not None:
-                                request.trailers.clear()
-                            else:
-                                request.trailers = mitmproxy.http.Headers()
-                            for trailer in v:
-                                request.trailers.add(*trailer)
-                        elif k == "content":
-                            request.text = v
-                        else:
-                            raise APIError(400, f"Unknown update request.{k}: {v}")
+                request.method = data['method'].decode()
+                request.path = data['path'].decode()
+                request.http_version = data['http_version'].decode()
 
-                elif a == "response" and hasattr(flow, "response"):
-                    response: mitmproxy.http.Response = flow.response
-                    for k, v in b.items():
-                        if k in ["msg", "http_version"]:
-                            setattr(response, k, str(v))
-                        elif k == "code":
-                            response.status_code = int(v)
-                        elif k == "headers":
-                            response.headers.clear()
-                            for header in v:
-                                response.headers.add(*header)
-                        elif k == "trailers":
-                            if response.trailers is not None:
-                                response.trailers.clear()
-                            else:
-                                response.trailers = mitmproxy.http.Headers()
-                            for trailer in v:
-                                response.trailers.add(*trailer)
-                        elif k == "content":
-                            response.text = v
-                        else:
-                            raise APIError(400, f"Unknown update response.{k}: {v}")
-                elif a == "marked":
-                    flow.marked = b
-                else:
-                    raise APIError(400, f"Unknown update {a}: {b}")
+                request.headers.clear()
+                for header in data['headers']:
+                    request.headers.add(*header)
+
+                request.content = data['body']
+            elif msg_type == "response" and hasattr(flow, "response"):
+                response: mitmproxy.http.Response = flow.response
+                message_bytes = base64.b64decode(self.json["raw"])
+                data = self._parseResponse(message_bytes)
+
+                response.status_code = data['code']
+                # response.reason = data['message']
+                response.http_version = data['http_version'].decode()
+
+                response.headers.clear()
+                for header in data['headers']:
+                    response.headers.add(*header)
+
+                response.content = data['body']
         except APIError:
             flow.revert()
             raise
+        self.flow.resume()
         self.view.update([flow])
 
+    def _parseRequest(self, data):
+        method = b""
+        path = b""
+        http_version = b""
+        first_line = b""
+        headers = []
+        body = b""
+        tmp = data.split(b"\r\n\r\n", 1)
+        tmp2 = tmp[0].split(b"\r\n", 1)
+        tmp3 = tmp2[0]
+        _mt = b""
+        # dirty `   GET   XX`
+        tmp3 = re.sub(re.compile( b'\s+' ), b' ', tmp3)
+        tmp3 = tmp3.split(b" ",2)
+        if len(tmp3) > 0:
+            method = tmp3[0]
+        if len(tmp3) > 1:
+            path = tmp3[1]
+        if len(tmp3) > 2:
+            http_version = b"".join(tmp3[2:])
+        if len(tmp2) == 2:
+            for h in tmp2[1].split(b"\r\n"):
+                if len(h.split(b": ")) == 1:
+                    headers.append([h.split(b": ")[0], ""])
+                else:
+                    headers.append(h.split(b": "))
+        if len(tmp) == 2:
+            body = tmp[1]
+        return {
+            'method': method,
+            'path': path,
+            'http_version': http_version,
+            'headers': headers,
+            'body': body
+        }
+
+    def _parseResponse(self, data):
+        code = -1
+        message = b""
+        http_version = b""
+        first_line = b""
+        headers = []
+        body = b""
+        tmp = data.split(b"\r\n\r\n", 1)  # tách header vs body
+        tmp2 = tmp[0].split(b"\r\n", 1)  # tách firstline vs header
+        tmp3 = tmp2[0].strip()  # firstline
+        _mt = b""
+        # dirty `  HTTP   GET   XX`
+        tmp3 = re.sub(re.compile( b'\s+' ), b' ', tmp3)
+        tmp3 = tmp3.split(b" ",2)
+        if len(tmp3) > 0:
+            http_version = tmp3[0]
+        if len(tmp3) > 1:
+            if tmp3[1].isdigit():
+                code = int(tmp3[1])
+        if len(tmp3) > 2:
+            message = b"".join(tmp3[2:])
+        if len(tmp2) == 2:
+            for h in tmp2[1].split(b"\r\n"):
+                if len(h.split(b": ")) == 1:
+                    headers.append([h.split(b": ")[0], ""])
+                else:
+                    headers.append(h.split(b": "))
+        if len(tmp) == 2:
+            body = tmp[1]
+        return {
+            'code': code,
+            'message': message,
+            'http_version': http_version,
+            'headers': headers,
+            'body': body
+        }
 
 
 class FlowContentView(RequestHandler):
@@ -796,7 +851,7 @@ class Application(tornado.web.Application):
             autoreload=False,
             transforms=[GZipContentAndFlowFiles],
         )
-        pydevd_pycharm.settrace('localhost', port=52011, stdoutToServer=True, stderrToServer=True)
+        # pydevd_pycharm.settrace('localhost', port=52011, stdoutToServer=True, stderrToServer=True)
         # print("--------WEB backend has INIT-----")
         self.add_handlers("dns-rebind-protection", [(r"/.*", DnsRebind)])
         self.add_handlers(
@@ -821,7 +876,7 @@ class Application(tornado.web.Application):
                 (r"/flows/(?P<flow_id>[0-9a-f\-]+)/revert", RevertFlow),
                 (r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|messages)/content.data", FlowContent),
                 (r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|all)/raw", FlowRaw),
-                (r"/flows/(?P<flow_id>[0-9a-f\-]+)/modify",FlowModify),
+                (r"/flows/(?P<flow_id>[0-9a-f\-]+)/modify/(?P<message>request|response|all|websocket|tcp)", FlowModify),
                 (
                     r"/flows/(?P<flow_id>[0-9a-f\-]+)/(?P<message>request|response|messages)/"
                     r"content/(?P<content_view>[0-9a-zA-Z\-\_%]+)(?:\.json)?",
