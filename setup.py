@@ -94,8 +94,8 @@ setup(
         "pyperclip>=1.6.0,<1.9",
         "ruamel.yaml>=0.16,<0.18",
         "base91>=1.0.1",
-        # Kaitai parsers depend on setuptools, remove once https://github.com/kaitai-io/kaitai_struct_python_runtime/issues/62 is fixed
         "setuptools",
+        "click>=7.0,<8.2",
         "sortedcontainers>=2.3,<2.5",
         "tornado>=6.2,<7",
         "urwid-mitmproxy>=2.1.1,<2.2",
