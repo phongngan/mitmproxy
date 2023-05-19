@@ -5,7 +5,7 @@ def assemble_request(request):
     body = b"".join(
         assemble_body(
             request.data.headers, [request.data.content], request.data.trailers
-        )
+        )sd
     )
     return head + body
 
@@ -50,12 +50,18 @@ def assemble_response_head(response):
 def assemble_body(headers, body_chunks, trailers):
     if "chunked" in headers.get("transfer-encoding", "").lower():
         for chunk in body_chunks:
+            # if chunk:
+            #     yield b"%x\r\n%s\r\n" % (len(chunk), chunk)
+            # if trailers:
+            #     yield b"0\r\n%s\r\n" % trailers
+            # else:
+            #     yield b"0\r\n\r\n"
             if chunk:
-                yield b"%x\r\n%s\r\n" % (len(chunk), chunk)
-        if trailers:
-            yield b"0\r\n%s\r\n" % trailers
-        else:
-            yield b"0\r\n\r\n"
+                yield b"%s" %  chunk
+            if trailers:
+                yield b"%s" % trailers
+            else:
+                yield b""
     else:
         if trailers:
             raise ValueError(
