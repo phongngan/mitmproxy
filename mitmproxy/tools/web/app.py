@@ -230,8 +230,8 @@ class RequestHandler(tornado.web.RequestHandler):
 
     @property
     def json(self):
-        print("-----------json-------------")
-        print(self.request.body.decode())
+        # print("-----------json-------------")
+        # print(self.request.body.decode())
         if not self.request.headers.get("Content-Type", "").startswith("application/json"):
             raise APIError(400, "Invalid Content-Type, expected application/json.")
         try:
@@ -565,16 +565,19 @@ class FlowRaw(RequestHandler):
 class FlowModify(RequestHandler):
 
     def post(self, flow_id, message):
-
+        print("1")
         flow: mitmproxy.flow.Flow = self.flow
         flow.backup()
+        print("2")
         try:
+            print("3")
             msg_type = message
             if msg_type == "request" and hasattr(flow, "request"):
+                print("4")
                 request: mitmproxy.http.Request = flow.request
                 message_bytes = base64.b64decode(self.json["raw"])
                 data = self._parseRequest(message_bytes)
-
+                print("5")
                 request.method = data['method'].decode()
                 request.path = data['path'].decode()
                 request.http_version = data['http_version'].decode()
@@ -582,26 +585,29 @@ class FlowModify(RequestHandler):
                 request.headers.clear()
                 for header in data['headers']:
                     request.headers.add(*header)
-
+                print("6")
                 request.content = data['body']
             elif msg_type == "response" and hasattr(flow, "response"):
                 response: mitmproxy.http.Response = flow.response
                 message_bytes = base64.b64decode(self.json["raw"])
                 data = self._parseResponse(message_bytes)
-
+                print("7")
                 response.status_code = data['code']
                 # response.reason = data['message']
                 response.http_version = data['http_version'].decode()
-
+                print("8")
                 response.headers.clear()
                 for header in data['headers']:
                     response.headers.add(*header)
 
                 response.content = data['body']
-        except APIError:
+                print("9")
+        except Exception as e:
+            print(f"FlowModify ERROR: {e}")
             flow.revert()
             raise
         self.flow.resume()
+        print("11")
         self.view.update([flow])
 
     def _parseRequest(self, data):
@@ -626,10 +632,10 @@ class FlowModify(RequestHandler):
             http_version = b"".join(tmp3[2:])
         if len(tmp2) == 2:
             for h in tmp2[1].split(b"\r\n"):
-                if len(h.split(b": ")) == 1:
+                if len(h.split(b": ", maxsplit=1)) == 1:
                     headers.append([h.split(b": ")[0], ""])
                 else:
-                    headers.append(h.split(b": "))
+                    headers.append(h.split(b": ", maxsplit=1))
         if len(tmp) == 2:
             body = tmp[1]
         return {
@@ -666,7 +672,7 @@ class FlowModify(RequestHandler):
                 if len(h.split(b": ")) == 1:
                     headers.append([h.split(b": ")[0], ""])
                 else:
-                    headers.append(h.split(b": "))
+                    headers.append(h.split(b": ", maxsplit=1))
         if len(tmp) == 2:
             body = tmp[1]
         return {

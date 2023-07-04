@@ -5,7 +5,7 @@ def assemble_request(request):
     body = b"".join(
         assemble_body(
             request.data.headers, [request.data.content], request.data.trailers
-        )sd
+        )
     )
     return head + body
 
